@@ -20,6 +20,13 @@ Check the version letter in the bottom-right corner during play (for example, "V
 - Use a phone if you can.
 - Fill in a row in the rating sheet right after each game.
 
+## Sending your results
+- When the game ends, tap the green Download ratings button. It saves a small file. On a phone it goes to your Downloads (the Files app on iPhone).
+- Email the file to Ania, at the address in the email you got from her.
+- Then add a row in the rating sheet for that game.
+
+After each sleigh, tap Too easy, Just right or Too hard. The game records your answers, so you don't need to type them in the sheet.
+
 ## Rating sheet guide
 Open the **"Elf Express balance test ratings"** sheet, **"Plays"** tab:
 
@@ -29,7 +36,6 @@ Open the **"Elf Express balance test ratings"** sheet, **"Plays"** tab:
 - **Device**: Phone (touch), Tablet (touch), or Computer (mouse).
 - **Furthest sleigh reached**: the last sleigh you got to, 1 to 8.
 - **Beat all 8?**: Yes or No.
-- **Sleighs 1-3 felt / Sleighs 4-6 felt / Sleighs 7-8 felt**: Too easy, Just right, or Too hard. Leave blank if you didn't get that far.
 - **Fun (1-5)**: 1 = boring or frustrating, 5 = loved it.
 - **Play again?**: Yes, Maybe, or No.
 - **Notes**: anything you noticed, especially where you got bored, where it got overwhelming, and what made you lose.
