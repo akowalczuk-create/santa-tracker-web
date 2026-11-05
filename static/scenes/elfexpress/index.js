@@ -605,7 +605,6 @@ function newGame() {
     tuneMode: !!tunePanelEl,
     cmd: null, queue: null, keys: {},
     firstSnowballShown: false, snowballBoxUp: false, snowballHitT: 0, snowballShedAcc: 0, snowballSchedule: [],
-    cocoaSchedule: [], popups: [],
     takeoff: 0, hitchT: 0, stars: 0, won: false,
     tut: 0, tutBoxUp: false, tutTimer: 0,
     sky: Array.from({ length: 40 }, () => ({
@@ -1196,17 +1195,6 @@ function buildWaveQueue(waveIdx) {
       }
     }
 
-    // Schedule hot chocolate bonus mug (one per sleigh from Sleigh 3 on)
-    const wantCocoa = w.hotCocoa !== undefined ? w.hotCocoa : (w.wave >= 3 ? 1 : 0);
-    q.cocoa = [];
-    for (let ci = 0; ci < wantCocoa; ci++) {
-      q.cocoa.push({
-        spawnAt: Number((3.4 + ci * 5.0).toFixed(2)),
-        belt: (waveIdx + 1 + ci) % (w.floors || 3),
-        startX: -22,
-      });
-    }
-
     const slackTouch = verifyWaveSolvable(q, w.teeter, carryCap, startFloor, startX, 1.0);
     const slackMouse = verifyWaveSolvable(q, w.teeter, carryCap, startFloor, startX, TUNE.mouseTimeMul || 1.15);
     const slack = Math.min(slackTouch, slackMouse);
@@ -1272,9 +1260,6 @@ function startWave(waveIdx) {
   S.waveQueue = buildWaveQueue(S.sleighsDone);
   S.snowballSchedule = (S.waveQueue && Array.isArray(S.waveQueue.snowballs))
     ? S.waveQueue.snowballs.map(sb => ({ ...sb }))
-    : [];
-  S.cocoaSchedule = (S.waveQueue && Array.isArray(S.waveQueue.cocoa))
-    ? S.waveQueue.cocoa.map(c => ({ ...c }))
     : [];
   S.spawnTimer = S.waveQueue.length ? effEventDelay(S.waveQueue[0]) : 1.0;
   syncTunePanel();
@@ -1350,21 +1335,6 @@ function spawnSnowballOnBelt(preferredBelt, startX = 24) {
   return g;
 }
 
-function spawnCocoaOnBelt(belt, startX = -22) {
-  const nFloors = activeFloors();
-  const safeBelt = Math.max(0, Math.min(nFloors - 1, belt || 0));
-  const g = {
-    id: S.nextId++, cat: 0, v: 0, belt: safeBelt, state: 'belt',
-    isCocoa: true,
-    x: startX, y: beltY(safeBelt) - GIFT_R,
-    timer: 0, teeter: wave().teeter,
-    wrapped: false, tilt: 0, spin: 0, gusted: false,
-    path: null, seg: 0, p: 0, speed: 0, dropFloor: -1, ductFloor: -1,
-  };
-  S.gifts.push(g);
-  return g;
-}
-
 function spawnGiftOnBelt(belt, startX = -30, teeterOverride = null, catOverride = null) {
   const nFloors = activeFloors();
   const safeBelt = Math.max(0, Math.min(nFloors - 1, belt));
@@ -1428,17 +1398,9 @@ function processWaveQueue(dt) {
     }
   }
 
-  // Spawn scheduled hot chocolate mug (one per sleigh from Sleigh 3 on)
-  if (Array.isArray(S.cocoaSchedule) && S.cocoaSchedule.length > 0) {
-    if ((S.sleighTimer || 0) >= S.cocoaSchedule[0].spawnAt * inputTimeMul()) {
-      const cc = S.cocoaSchedule.shift();
-      spawnCocoaOnBelt(cc.belt, cc.startX !== undefined ? cc.startX : -22);
-    }
-  }
-
   // Keep the end-of-level burst (or steady flow in Sleigh 1) running until the sleigh is full
   if (!S.waveQueue.length) {
-    const activeGifts = S.gifts.filter(g => !g.isSnowball && !g.isCocoa && g.state !== 'done' && g.state !== 'toBin' && g.state !== 'rejecting').length;
+    const activeGifts = S.gifts.filter(g => !g.isSnowball && g.state !== 'done' && g.state !== 'toBin' && g.state !== 'rejecting').length;
     if (S.inSleigh + activeGifts < sleighTarget()) {
       const w = wave();
       const isBurst = (w.burstSize || 0) > 0;
@@ -1589,16 +1551,6 @@ function updateGifts(dt) {
           if (g.timer >= TUNE.fallTime) {
             puff(g.x, feetY(g.belt) - 8, '#FFFFFF', 14);
             puff(g.x, feetY(g.belt) - 8, '#BAE6FD', 10);
-            g.state = 'done';
-          }
-          break;
-        }
-        if (g.isCocoa) {
-          const y0 = beltY(g.belt) - GIFT_R, y1 = feetY(g.belt) - 10;
-          g.x = TEETER_X + 18 * k;
-          g.y = y0 + (y1 - y0) * k * k;
-          if (g.timer >= TUNE.fallTime) {
-            puff(g.x, feetY(g.belt) - 8, '#FDE68A', 8);
             g.state = 'done';
           }
           break;
@@ -1825,23 +1777,6 @@ function doAction(edge, manual) {
   }
   if (manual && (e.x < DROP_X0 || e.x > DROP_X1)) {
     e.x = Math.max(DROP_X0, Math.min(DROP_X1, e.x));
-  }
-  if (g.isCocoa) {
-    g.state = 'done';
-    const pts = TUNE.hotCocoaBonus || 500;
-    S.score += pts;
-    reportScore();
-    if (!Array.isArray(S.popups)) S.popups = [];
-    S.popups.push({ x: e.x, y: carryY(e.floor) - 18, text: `+${pts}`, age: 0, life: 1.05 });
-    S.actionBuf = 0; S.actionHeld = false;
-    S.cmd = null; S.queue = null;
-    clearSnowballTaps();
-    S.catchFlash = 0.3;
-    S.beltPulse[e.floor] = 0.5;
-    puff(e.x, carryY(e.floor), '#FBBF24', 12);
-    puff(e.x, carryY(e.floor), '#FFFFFF', 6);
-    api.play('pd_player_level_up');
-    return;
   }
   g.state = 'carried'; g.tilt = 0; g.timer = 0; g.spin = 0;
   e.bag.push(g);
@@ -2264,10 +2199,6 @@ function puff(x, y, color, n) {
 function updateFx(dt) {
   for (const p of S.fx) { p.age += dt; p.vy += 470 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
   S.fx = S.fx.filter(p => p.age < p.life);
-  if (Array.isArray(S.popups)) {
-    for (const pop of S.popups) { pop.age += dt; pop.y -= 32 * dt; }
-    S.popups = S.popups.filter(pop => pop.age < pop.life);
-  }
 }
 
 function updateSnow(dt) {

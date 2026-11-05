@@ -487,84 +487,12 @@ function drawSnowballOnBelt(g2, g) {
   g2.restore();
 }
 
-function drawHotCocoaOnBelt(g2, g) {
-  g2.save();
-  if (g.tilt) g2.rotate(g.tilt);
-
-  // Subtle shadow under the mug on the belt
-  g2.fillStyle = 'rgba(15,23,42,.24)';
-  g2.beginPath();
-  g2.ellipse(0, 17, 13, 4, 0, 0, Math.PI * 2);
-  g2.fill();
-
-  // Mug handle on the right (flat Santa Tracker style)
-  g2.strokeStyle = '#DC2626';
-  g2.lineWidth = 4.5;
-  g2.lineCap = 'round';
-  g2.beginPath();
-  g2.arc(10.5, 3, 6.5, -Math.PI * 0.45, Math.PI * 0.45);
-  g2.stroke();
-  g2.strokeStyle = '#1E293B';
-  g2.lineWidth = 1.6;
-  g2.beginPath();
-  g2.arc(10.5, 3, 8.2, -Math.PI * 0.45, Math.PI * 0.45);
-  g2.stroke();
-
-  // Mug body (warm festive red with darker right shade, no gift ring)
-  g2.fillStyle = '#DC2626';
-  g2.strokeStyle = '#1E293B';
-  g2.lineWidth = 2.0;
-  g2.beginPath();
-  g2.roundRect(-12, -8, 22, 24, [2, 2, 6, 6]);
-  g2.fill();
-  g2.stroke();
-
-  // Festive white stripe & dot on the mug
-  g2.fillStyle = '#FFFFFF';
-  g2.fillRect(-10.5, 2, 19, 3.5);
-  g2.beginPath();
-  g2.arc(-1, -2.5, 2.2, 0, Math.PI * 2);
-  g2.fill();
-
-  // Hot chocolate surface & tiny marshmallows at the rim
-  g2.fillStyle = '#78350F';
-  g2.strokeStyle = '#1E293B';
-  g2.lineWidth = 1.6;
-  g2.beginPath();
-  g2.ellipse(-1, -7.5, 10.5, 3.4, 0, 0, Math.PI * 2);
-  g2.fill();
-  g2.stroke();
-
-  g2.fillStyle = '#FFFFFF';
-  g2.fillRect(-5.5, -9.5, 4, 3);
-  g2.fillRect(0.5, -9.0, 3.5, 2.8);
-
-  // Little rising steam wisps above the mug
-  const wavePhase = reduceMotion ? 0 : (g.x * 0.08 + (g.timer || 0) * 5);
-  g2.strokeStyle = 'rgba(255,255,255,.88)';
-  g2.lineWidth = 2.2;
-  g2.lineCap = 'round';
-  for (const sx of [-4.5, 2.5]) {
-    const sw = Math.sin(wavePhase + sx) * 2.2;
-    g2.beginPath();
-    g2.moveTo(sx, -13);
-    g2.quadraticCurveTo(sx + sw, -18, sx - sw * 0.7, -23);
-    g2.stroke();
-  }
-  g2.restore();
-}
-
 function drawGift(g2, g) {
   g2.save();
   if (g.state === 'belt' && g.x < 44) { g2.beginPath(); g2.rect(18, 0, W, H); g2.clip(); }
   g2.translate(g.x, g.y);
   if (g.isSnowball) {
     drawSnowballOnBelt(g2, g);
-    g2.restore();
-    return;
-  }
-  if (g.isCocoa) {
-    drawHotCocoaOnBelt(g2, g);
     g2.restore();
     return;
   }
@@ -1707,23 +1635,6 @@ export function renderScene(S, elfChoice, floors, sleighTargetVal, canCatch) {
     }
   }
   cx.globalAlpha = 1;
-
-  if (Array.isArray(S.popups)) {
-    cx.save();
-    cx.font = "bold 20px 'Google Sans',sans-serif";
-    cx.textAlign = 'center';
-    cx.textBaseline = 'middle';
-    for (const pop of S.popups) {
-      const alpha = Math.max(0, Math.min(1, 1 - pop.age / (pop.life || 1)));
-      cx.globalAlpha = alpha;
-      cx.strokeStyle = '#0F172A';
-      cx.lineWidth = 4.5;
-      cx.strokeText(pop.text, pop.x, pop.y);
-      cx.fillStyle = '#FDE047';
-      cx.fillText(pop.text, pop.x, pop.y);
-    }
-    cx.restore();
-  }
 
   drawSnow(cx, S);
   drawGust(cx, S);
