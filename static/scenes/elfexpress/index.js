@@ -1530,7 +1530,7 @@ function updateGifts(dt) {
         break;
       }
       case 'teeter': {
-        if (pausedBelts && !g.tutGift) break;
+        if (pausedBelts) break;
         g.timer += dt;
         const len = teeterLen(g);
         const k = (g.tutGift && len > 100) ? 0.65 : Math.min(g.timer / len, 1);
@@ -1736,6 +1736,7 @@ const atChute = () => !S.elf.climbing && S.elf.x >= LADDER_CX - 16;
 
 function doAction(edge, manual) {
   if (!S || S.mode !== 'play') return;
+  if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) return;
   const e = S.elf;
 
   if (manual && edge && e.bag.length > 0 && atChute()) {
@@ -1785,12 +1786,14 @@ function doAction(edge, manual) {
   api.play('pd_player_present_pickup');
   if (S.tut === 2) {
     S.tut = 3;
-    S.tutBoxUp = false;
+    S.tutBoxUp = true;
     S.tutTimer = 0;
-    tutGift(0, 1);
+    clearKeys();
   } else if (S.tut === 3) {
     S.tut = 4;
     S.tutBoxUp = true;
+    S.tutTimer = 0;
+    clearKeys();
   }
   S.cmd = null; S.queue = null;
   clearSnowballTaps();
@@ -1836,10 +1839,9 @@ function releaseGift(onlyMatching = false) {
     api.play('pd_item_miss');
   }
   if (S.tut === 4 && e.bag.length === 0) {
-    S.tut = 5;
-    S.tutBoxUp = false;
-    S.tutTimer = 0;
-    tutWatchGift(0);
+    S.cmd = null;
+    S.queue = null;
+    clearKeys();
   }
   return true;
 }
@@ -1855,6 +1857,14 @@ function landInSleigh(g) {
   if (g && g.tutGift) {
     S.inSleigh = Math.min(2, (S.inSleigh || 0) + 1);
     puff(SLEIGH_X, SLEIGH_Y - 18, '#FFE14D', 16);
+    if (S.tut === 4 && S.inSleigh >= 2 && S.elf.bag.length === 0) {
+      S.tut = 5;
+      S.tutBoxUp = true;
+      S.tutTimer = 0;
+      S.cmd = null;
+      S.queue = null;
+      clearKeys();
+    }
     return;
   }
   S.inSleigh++;
@@ -1982,15 +1992,17 @@ function stepTo(e, tf, tx, dt) {
 function updateElf(dt) {
   const e = S.elf;
   const prevX = e.x, prevY = e.y;
-  if (S.snowballBoxUp || (S.tut && S.tut !== 2 && S.tut !== 3 && S.tut !== 4)) {
+  if (S.snowballBoxUp || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && e.bag.length === 0)))) {
     clearKeys();
+    S.cmd = null;
+    S.queue = null;
     S.liveSpeed = 0;
     return;
   }
   const spdMul = elfSpeedMul();
   const effRunSpd = TUNE.runSpeed * spdMul;
   const effClimbSpd = TUNE.climbSpeed * spdMul;
-  const k = S.keys, maxF = activeFloors() - 1;
+  const k = S.keys, maxF = S.tut === 2 ? 0 : activeFloors() - 1;
   e.climbPause = 0;
   let mx = 0, my = 0;
   if (k.left) mx--; if (k.right) mx++; if (k.up) my--; if (k.down) my++;
@@ -2280,18 +2292,47 @@ function tutDismissOk() {
   }
   if (!S.tut || !S.tutBoxUp) return false;
   const st = TUT[S.tut - 1];
-  if (!st || !st.ok) return false;
+  if (!st) return false;
   api.play('pd_player_present_pickup');
+  S.cmd = null;
+  S.queue = null;
+  S.actionEdge = false;
+  S.actionBuf = 0;
+  S.actionHeld = false;
+  clearKeys();
   if (S.tut === 1) {
     S.tut = 2;
+    S.tutBoxUp = true;
+    S.tutTimer = 0;
+    return true;
+  }
+  if (S.tut === 2) {
     S.tutBoxUp = false;
     S.tutTimer = 0;
-    tutGift(1, 0);
+    if (!S.gifts.some(g => g.tutGift && g.belt === 0 && g.state !== 'carried')) {
+      tutGift(1, 0);
+    }
+    return true;
+  }
+  if (S.tut === 3) {
+    S.tutBoxUp = false;
+    S.tutTimer = 0;
+    if (!S.gifts.some(g => g.tutGift && g.belt === 1 && g.state !== 'carried')) {
+      tutGift(0, 1);
+    }
+    return true;
+  }
+  if (S.tut === 4) {
+    S.tutBoxUp = false;
+    S.tutTimer = 0;
     return true;
   }
   if (S.tut === 5) {
     S.tutBoxUp = false;
     S.tutTimer = 0;
+    if (!S.gifts.some(g => g.tutWatch)) {
+      tutWatchGift(0);
+    }
     return true;
   }
   if (S.tut === 6) {
@@ -2303,19 +2344,6 @@ function tutDismissOk() {
 
 function updateTutorial(dt) {
   if (!S || !S.tut) return;
-  if ((S.tut === 2 || S.tut === 3) && !S.tutBoxUp) {
-    const wantBelt = S.tut === 3 ? 1 : 0;
-    const g = S.gifts.find(item => item.tutGift && item.belt === wantBelt && item.state !== 'carried');
-    if (g && g.state === 'teeter' && g.timer >= 0.22) {
-      S.tutBoxUp = true;
-    }
-  } else if (S.tut === 5 && !S.tutBoxUp) {
-    const g = S.gifts.find(item => item.tutWatch);
-    if (g && (g.state === 'falling' || g.state === 'landed') && !g.shownStep5) {
-      g.shownStep5 = true;
-      S.tutBoxUp = true;
-    }
-  }
 }
 
 let last = 0, raf = 0;
@@ -2348,9 +2376,6 @@ function frame(now) {
       const beltMul = (S.breatheSlowT > 0 || S.relaxT > 0) ? 0.28 : 1.0;
       S.beltAnimT += dt * beltMul;
       processWaveQueue(dt);
-    } else if (S.tut === 6) {
-      // Keep recycler flash/shake animated while Step 6 box is up
-      S.t += dt;
     }
     updateElf(dt);
     if (S.actionBuf > 0) S.actionBuf = Math.max(0, S.actionBuf - dt);
@@ -2387,7 +2412,7 @@ function onKeyDown(ev) {
   if (!S || S.mode !== 'play') return;
   const k = KEYMAP[ev.key];
   if (k) {
-    if (S.tut && S.tut !== 2 && S.tut !== 3 && S.tut !== 4) {
+    if (S.snowballBoxUp || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && S.elf.bag.length === 0) || (S.tut === 2 && (k === 'up' || k === 'down'))))) {
       ev.preventDefault();
       return;
     }
@@ -2397,7 +2422,7 @@ function onKeyDown(ev) {
     S.queue = null;
     clearSnowballTaps();
     if (!ev.repeat && !wasDown) {
-      const e = S.elf, maxF = activeFloors() - 1;
+      const e = S.elf, maxF = S.tut === 2 ? 0 : activeFloors() - 1;
       if (k === 'up' || k === 'down') {
         const dir = k === 'up' ? 1 : -1;
         let base = e.climbTo !== null ? e.climbTo : e.floor;
@@ -2499,17 +2524,13 @@ window.addEventListener('blur', () => {
 });
 
 function tapTarget(p) {
-  if (((S.tut && S.tutBoxUp) || S.snowballBoxUp) && isTutOkClick(p, S)) {
+  if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) {
     tutDismissOk();
     return;
   }
   if (S.tut) {
-    if (S.tutBoxUp && isTutOkClick(p, S)) {
-      tutDismissOk();
-      return;
-    }
     const st = TUT[S.tut - 1];
-    if (!st || st.ok) return;
+    if (!st || st.go === 'ok') return;
     const tf = Math.max(0, Math.min(4, Math.floor((GROUND_Y - p.y) / FLOOR_H)));
     const side = p.x < TAP_SPLIT ? 'belt' : 'chute';
     if (st.go === 'belt') {

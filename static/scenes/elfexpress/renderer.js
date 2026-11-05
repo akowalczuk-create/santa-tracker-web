@@ -721,12 +721,12 @@ function getGuideTargets(S) {
   let beltGift = null;
 
   // Bouncing arrows for tutorial catch (belt) and drop (chute) steps
-  if ((S.tut === 2 || S.tut === 3) && S.tutBoxUp) {
+  if (S.tut === 2 || S.tut === 3) {
     const wantBelt = S.tut === 3 ? 1 : 0;
     beltGift = S.gifts.find(g => g.tutGift && g.belt === wantBelt && g.state !== 'carried') ||
       S.gifts.find(g => g.tutGift && g.state !== 'carried') || null;
     beltFloor = beltGift ? beltGift.belt : wantBelt;
-  } else if (S.tut === 4 && S.tutBoxUp) {
+  } else if (S.tut === 4) {
     const bag = (S.elf && S.elf.bag) || [];
     chuteFloors = Array.from(new Set(bag.map(g => g.cat)));
     chuteFloor = chuteFloors.length ? chuteFloors[0] : -1;

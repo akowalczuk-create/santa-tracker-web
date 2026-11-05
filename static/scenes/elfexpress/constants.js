@@ -491,20 +491,20 @@ export const TUT = [
     step: 2,
     go: 'belt',
     f: 0,
-    ok: false,
+    ok: true,
     text: 'Tap the conveyor to catch the toy.',
   },
   {
     step: 3,
     go: 'belt',
     f: 1,
-    ok: false,
+    ok: true,
     text: 'You can carry two! Catch another one.',
   },
   {
     step: 4,
     go: 'chute',
-    ok: false,
+    ok: true,
     text: 'Now drop each toy in its matching chute so it gets the right wrapping.',
   },
   {
