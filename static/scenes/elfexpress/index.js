@@ -133,17 +133,25 @@ function ensureBalanceTestUi() {
       });
       b.addEventListener('click', ev => {
         ev.stopPropagation();
-        if (!S || S.mode !== 'play' || S.relaxT <= 0) return;
+        if (!S || S.mode !== 'play' || !S.waitingForRating || (S.ratingLockoutT || 0) > 0) return;
         const doneIdx = Math.max(0, (S.sleighsDone || 1) - 1);
         if (S.sleighRatings) S.sleighRatings[doneIdx] = label;
+        S.waitingForRating = false;
+        S.ratingLockoutT = 0;
         showPhewRateBar(false);
         S.relaxT = 0;
         S.breatheCueT = 0;
         S.breatheSlowT = 0;
         S.recycled = 0;
-        startWave(S.sleighsDone);
         b.blur();
         cv.focus({ preventScroll: true });
+        if (S.sleighsDone >= WAVES.length) {
+          S.stars = S.waveStars ? S.waveStars.filter(Boolean).length : 0;
+          say(_msg`elfexpress_sr_win`);
+          endRun(true);
+        } else {
+          startWave(S.sleighsDone);
+        }
       });
       bar.appendChild(b);
     });
@@ -602,6 +610,8 @@ function newGame() {
     sleighRatings: Array.from({ length: WAVES.length }, () => null),
     sleighMisses: Array.from({ length: WAVES.length }, () => null),
     sleighReached: Array.from({ length: WAVES.length }, () => false),
+    waitingForRating: false,
+    ratingLockoutT: 0,
     tuneMode: !!tunePanelEl,
     cmd: null, queue: null, keys: {},
     firstSnowballShown: false, snowballBoxUp: false, snowballBoxLockT: 0, snowballHitT: 0, snowballShedAcc: 0, snowballSchedule: [],
@@ -1409,6 +1419,8 @@ function buildWaveQueue(waveIdx) {
 
 function startWave(waveIdx) {
   showPhewRateBar(false);
+  S.waitingForRating = false;
+  S.ratingLockoutT = 0;
   S.sleighsDone = Math.max(0, Math.min(WAVES.length - 1, waveIdx));
   if (S.sleighReached) S.sleighReached[S.sleighsDone] = true;
   if (S.sleighMisses) S.sleighMisses[S.sleighsDone] = 0;
@@ -1582,13 +1594,15 @@ function triggerGustNow(belts, mul) {
 
 function processWaveQueue(dt) {
   if (S.tut) return;
-  if (S.relaxT > 0) {
-    S.relaxT = Math.max(0, S.relaxT - dt);
-    if (S.recycleDrainFrom > 0 && S.recycleDrainDur > 0) {
-      const k = Math.max(0, (S.relaxT - 0.35) / Math.max(0.5, S.recycleDrainDur - 0.35));
-      S.recycled = Math.max(0, Math.ceil(S.recycleDrainFrom * k - 0.05));
+  if (S.waitingForRating || S.relaxT > 0) {
+    if (S.relaxT > 0) {
+      S.relaxT = S.waitingForRating ? Math.max(0.01, S.relaxT - dt) : Math.max(0, S.relaxT - dt);
+      if (S.recycleDrainFrom > 0 && S.recycleDrainDur > 0) {
+        const k = Math.max(0, (S.relaxT - 0.35) / Math.max(0.5, S.recycleDrainDur - 0.35));
+        S.recycled = Math.max(0, Math.ceil(S.recycleDrainFrom * k - 0.05));
+      }
     }
-    if (S.relaxT <= 0) {
+    if (!S.waitingForRating && S.relaxT <= 0) {
       startWave(S.sleighsDone);
     }
     return;
@@ -1924,7 +1938,7 @@ const atChute = () => !S.elf.climbing && S.elf.x >= LADDER_CX - 16;
 
 function doAction(edge, manual) {
   if (!S || S.mode !== 'play') return;
-  if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) return;
+  if ((S.tut && S.tutBoxUp) || S.snowballBoxUp || S.waitingForRating) return;
   const e = S.elf;
 
   if (manual && edge && e.bag.length > 0 && atChute()) {
@@ -2080,34 +2094,36 @@ function landInSleigh(g) {
   puff(SLEIGH_X, SLEIGH_Y - 18, '#FFE14D', 22);
   puff(SLEIGH_X, SLEIGH_Y - 18, '#32A658', 18);
 
-  if (S.sleighsDone >= WAVES.length) {
-    S.stars = S.waveStars ? S.waveStars.filter(Boolean).length : 0;
-    say(_msg`elfexpress_sr_win`);
-    endRun(true);
-  } else {
-    api.play('pd_player_level_up');
-    say(msgSleighAway(S.sleighsDone, SLEIGHS.length));
-    const prevWave = WAVES[Math.max(0, S.sleighsDone - 1)] || WAVES[0];
-    const pauseDur = prevWave.breathe || TUNE.relaxTime || 3.0;
-    S.phase = 'relax';
-    S.relaxT = pauseDur;
-    S.breatheCueDur = pauseDur;
-    S.breatheCueT = pauseDur;
-    S.breatheSlowT = pauseDur;
-    showPhewRateBar(true);
-    S.recycleDrainFrom = S.recycled || 0;
-    S.recycleDrainDur = pauseDur;
-    if (S.recycleDrainFrom > 0) {
-      puff(BIN_X, BIN_Y - 12, '#38BDF8', 10);
-    }
-    S.sleighFlyDur = Math.min(pauseDur, TUNE.sleighFlyTime || 1.8);
-    S.sleighFlyT = S.sleighFlyDur;
-    S.sleighFlyGifts = prevTarget;
-    S.waveQueue = [];
-    S.gifts = [];
-    S.elf.bag = [];
-    syncCarry();
+  api.play('pd_player_level_up');
+  say(msgSleighAway(S.sleighsDone, SLEIGHS.length));
+  const prevWave = WAVES[Math.max(0, S.sleighsDone - 1)] || WAVES[0];
+  const pauseDur = prevWave.breathe || TUNE.relaxTime || 3.0;
+  S.phase = 'relax';
+  S.relaxT = pauseDur;
+  S.waitingForRating = true;
+  S.ratingLockoutT = 0.5;
+  S.breatheCueDur = pauseDur;
+  S.breatheCueT = pauseDur;
+  S.breatheSlowT = pauseDur;
+  showPhewRateBar(true);
+  S.recycleDrainFrom = S.recycled || 0;
+  S.recycleDrainDur = pauseDur;
+  if (S.recycleDrainFrom > 0) {
+    puff(BIN_X, BIN_Y - 12, '#38BDF8', 10);
   }
+  S.sleighFlyDur = Math.min(pauseDur, TUNE.sleighFlyTime || 1.8);
+  S.sleighFlyT = S.sleighFlyDur;
+  S.sleighFlyGifts = prevTarget;
+  S.waveQueue = [];
+  S.gifts = [];
+  S.elf.bag = [];
+  S.cmd = null;
+  S.queue = null;
+  S.actionEdge = false;
+  S.actionBuf = 0;
+  S.actionHeld = false;
+  clearKeys();
+  syncCarry();
 }
 
 function breakCombo() {
@@ -2181,7 +2197,7 @@ function stepTo(e, tf, tx, dt) {
 function updateElf(dt) {
   const e = S.elf;
   const prevX = e.x, prevY = e.y;
-  if (S.snowballBoxUp || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && e.bag.length === 0)))) {
+  if (S.snowballBoxUp || S.waitingForRating || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && e.bag.length === 0)))) {
     clearKeys();
     S.cmd = null;
     S.queue = null;
@@ -2570,6 +2586,9 @@ function frame(now) {
     if (S.snowballBoxUp && S.snowballBoxLockT > 0) {
       S.snowballBoxLockT = Math.max(0, S.snowballBoxLockT - dt);
     }
+    if (S.waitingForRating && S.ratingLockoutT > 0) {
+      S.ratingLockoutT = Math.max(0, S.ratingLockoutT - dt);
+    }
     const pausedByTutBox = Boolean((S.tut && S.tutBoxUp) || S.snowballBoxUp);
     if (!pausedByTutBox) {
       S.t += dt;
@@ -2623,6 +2642,10 @@ const clearKeys = () => { if (S) S.keys.left = S.keys.right = S.keys.up = S.keys
 let keysBound = false;
 function onKeyDown(ev) {
   if (!S || S.mode !== 'play') return;
+  if (S.waitingForRating) {
+    ev.preventDefault();
+    return;
+  }
   const k = KEYMAP[ev.key];
   if (k) {
     if (S.snowballBoxUp || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && S.elf.bag.length === 0) || (S.tut === 2 && (k === 'up' || k === 'down'))))) {
@@ -2738,6 +2761,7 @@ window.addEventListener('blur', () => {
 });
 
 function tapTarget(p) {
+  if (S.waitingForRating) return;
   if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) {
     tutDismissOk();
     return;
