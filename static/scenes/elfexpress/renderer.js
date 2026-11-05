@@ -1054,9 +1054,10 @@ function drawSnow(g2, S) {
   const maxFall = SNOW[SNOW.length - 1] ? SNOW[SNOW.length - 1].fall : 2.20;
   const norm = Math.min(1, S.snowAmt / maxFall);
   const n = Math.min(S.snow.length, Math.max(14, Math.round(S.snow.length * (0.12 + 0.88 * norm))));
-  const bigFlakesOn = ((S.sleighsDone || 0) + 1) >= (SNOW_BIG_FLAKES_FROM_WAVE || 5);
+  const snowCoverWave = (TUNE && TUNE.snowBigFlakesFromWave) || SNOW_BIG_FLAKES_FROM_WAVE || 5;
+  const bigFlakesOn = ((S.sleighsDone || 0) + 1) >= snowCoverWave;
   const giftArea = Math.PI * GIFT_R * GIFT_R;
-  const maxCoverArea = giftArea * (SNOW_MAX_GIFT_COVER || 0.32);
+  const maxCoverArea = bigFlakesOn ? giftArea * (SNOW_MAX_GIFT_COVER || 0.32) : 0;
   const visGifts = [];
   if (S.gifts) {
     for (const g of S.gifts) {
@@ -1524,15 +1525,18 @@ function drawTuneSpeedHud(g2, S) {
 function drawMixCornerTag(g2, S) {
   if (!S || !S.mixLetter) return;
   g2.save();
-  g2.font = "bold 13px 'Google Sans',sans-serif";
-  const txt = S.mixLetter;
-  const x = W - 26;
-  const y = H - 18;
+  g2.font = "bold 12px 'Google Sans',sans-serif";
+  const txt = `Version ${S.mixLetter}`;
+  const padX = 9;
+  const boxW = Math.ceil(g2.measureText(txt).width) + padX * 2;
+  const boxH = 22;
+  const x = W - 10 - boxW / 2;
+  const y = H - 16;
   g2.fillStyle = 'rgba(15,23,42,.78)';
   g2.strokeStyle = 'rgba(255,255,255,.45)';
-  g2.lineWidth = 1.6;
+  g2.lineWidth = 1.5;
   g2.beginPath();
-  g2.roundRect(x - 14, y - 12, 28, 24, 6);
+  g2.roundRect(x - boxW / 2, y - boxH / 2, boxW, boxH, 6);
   g2.fill();
   g2.stroke();
   g2.fillStyle = '#F8FAFC';

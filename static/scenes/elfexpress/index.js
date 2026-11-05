@@ -1113,7 +1113,7 @@ function createWaveSpawner(waveIdx, startFloor = 0) {
     endGap,
     curveHorizon: Math.max(8, target * avgGap),
     beltCap: beltCapForWave(waveIdx),
-    peakSize: waveIdx >= 4 ? 4 : 3,
+    peakSize: w.peakSize || (waveIdx >= 4 ? 4 : 3),
     curFloors,
     floorBag: [],
     catBag: [],
@@ -2922,11 +2922,9 @@ api.addEventListener('restart', () => {
 
 api.addEventListener('data', ev => {
   const detail = ev && ev.detail;
-  const mix = parseMixLetter(detail);
-  if (mix) {
-    activeMixLetter = applyBalanceMix(mix) || activeMixLetter;
-    if (S) S.mixLetter = activeMixLetter;
-  }
+  const mix = parseMixLetter(detail) || 'A';
+  activeMixLetter = applyBalanceMix(mix) || 'A';
+  if (S) S.mixLetter = activeMixLetter;
   if (hasTuneFlag(detail)) initTunePanel();
   const w = parseWaveShortcut(detail);
   if (w) {
@@ -2951,11 +2949,9 @@ raf = requestAnimationFrame(frame);
 api.ready(data => {
   fit();
   api.play('qd_load_sounds');
-  const mix = parseMixLetter(data);
-  if (mix) {
-    activeMixLetter = applyBalanceMix(mix) || activeMixLetter;
-    if (S) S.mixLetter = activeMixLetter;
-  }
+  const mix = parseMixLetter(data) || 'A';
+  activeMixLetter = applyBalanceMix(mix) || 'A';
+  if (S) S.mixLetter = activeMixLetter;
   if (hasTuneFlag(data)) initTunePanel();
   shortcutWave = parseWaveShortcut(data);
   if (shortcutWave) {
