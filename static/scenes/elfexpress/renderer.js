@@ -1423,7 +1423,6 @@ function drawBreatheCue(g2, S) {
 }
 
 export const TUT_BOX_RECT = { x: 104, y: 120, w: 460, h: 124 };
-export const TUT_OK_RECT = { x: 280, y: 194, w: 108, h: 36 };
 
 function getActiveTextBox(S) {
   if (!S) return null;
@@ -1432,29 +1431,17 @@ function getActiveTextBox(S) {
   return null;
 }
 
-export function isTutOkClick(p, S) {
-  const st = getActiveTextBox(S);
-  if (!st || !st.ok) return false;
-  return (
-    p.x >= TUT_BOX_RECT.x - 10 &&
-    p.x <= TUT_BOX_RECT.x + TUT_BOX_RECT.w + 10 &&
-    p.y >= TUT_BOX_RECT.y - 10 &&
-    p.y <= TUT_BOX_RECT.y + TUT_BOX_RECT.h + 10
-  );
-}
-
 function drawTutorialBox(g2, S) {
   const st = getActiveTextBox(S);
   if (!st || !st.text) return;
 
   const boxW = 460;
-  const hasOk = !!st.ok;
   g2.save();
   g2.font = "bold 18px 'Google Sans',sans-serif";
   const lines = wrapText(g2, st.text, boxW - 44);
   const lineH = 25;
   const textH = lines.length * lineH;
-  const boxH = textH + (hasOk ? 76 : 36);
+  const boxH = textH + 62;
   const boxX = Math.round((BUILD_X0 + BUILD_X1) / 2 - boxW / 2);
   const boxY = 124;
 
@@ -1486,32 +1473,14 @@ function drawTutorialBox(g2, S) {
   g2.fillStyle = '#1E293B';
   g2.textAlign = 'center';
   g2.textBaseline = 'middle';
-  const startY = boxY + 26 + lineH * 0.35;
+  const startY = boxY + 24 + lineH * 0.35;
   for (let i = 0; i < lines.length; i++) {
     g2.fillText(lines[i], boxX + boxW / 2, startY + i * lineH);
   }
 
-  if (hasOk) {
-    const btnW = 104, btnH = 36;
-    const btnX = Math.round(boxX + (boxW - btnW) / 2);
-    const btnY = boxY + boxH - btnH - 14;
-    TUT_OK_RECT.x = btnX;
-    TUT_OK_RECT.y = btnY;
-    TUT_OK_RECT.w = btnW;
-    TUT_OK_RECT.h = btnH;
-
-    g2.fillStyle = '#16A34A';
-    g2.strokeStyle = '#14532D';
-    g2.lineWidth = 2.5;
-    g2.beginPath();
-    g2.roundRect(btnX, btnY, btnW, btnH, 18);
-    g2.fill();
-    g2.stroke();
-
-    g2.font = "bold 16px 'Google Sans',sans-serif";
-    g2.fillStyle = '#FFFFFF';
-    g2.fillText('OK', btnX + btnW / 2, btnY + btnH / 2 + 1);
-  }
+  g2.font = "500 13px 'Google Sans',sans-serif";
+  g2.fillStyle = '#64748B';
+  g2.fillText('Tap anywhere to continue', boxX + boxW / 2, boxY + boxH - 20);
   g2.restore();
 }
 

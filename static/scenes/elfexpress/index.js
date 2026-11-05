@@ -26,7 +26,7 @@ import {
   feetY, beltY, chuteY, carryY, TUT, KEYMAP, BALANCE_MIXES, applyBalanceMix,
 } from './constants.js';
 import {
-  cv, fit, toGame, reduceMotion, viewX0, viewY0, viewX1, viewY1, renderScene, isTutOkClick,
+  cv, fit, toGame, reduceMotion, viewX0, viewY0, viewX1, viewY1, renderScene,
 } from './renderer.js';
 
 api.preload.sounds('pd_load_sounds', 'qd_load_sounds');
@@ -604,7 +604,7 @@ function newGame() {
     sleighReached: Array.from({ length: WAVES.length }, () => false),
     tuneMode: !!tunePanelEl,
     cmd: null, queue: null, keys: {},
-    firstSnowballShown: false, snowballBoxUp: false, snowballHitT: 0, snowballShedAcc: 0, snowballSchedule: [],
+    firstSnowballShown: false, snowballBoxUp: false, snowballBoxLockT: 0, snowballHitT: 0, snowballShedAcc: 0, snowballSchedule: [],
     takeoff: 0, hitchT: 0, stars: 0, won: false,
     tut: 0, tutBoxUp: false, tutTimer: 0,
     sky: Array.from({ length: 40 }, () => ({
@@ -1453,8 +1453,20 @@ function startWave(waveIdx) {
   }
 
   S.waveQueue = buildWaveQueue(S.sleighsDone);
+  S.gifts = [];
   S.snowballSchedule = [];
   S.spawnTimer = S.waveQueue.length ? effEventDelay(S.waveQueue[0]) : 0.04;
+  if (!S.tut && !S.firstSnowballShown && (w.snowballs || 0) > 0) {
+    S.firstSnowballShown = true;
+    S.snowballBoxUp = true;
+    S.snowballBoxLockT = 1.0;
+    S.cmd = null;
+    S.queue = null;
+    S.actionEdge = false;
+    S.actionBuf = 0;
+    S.actionHeld = false;
+    clearKeys();
+  }
   syncTunePanel();
   reportScore();
 }
@@ -1678,11 +1690,6 @@ function updateGifts(dt) {
       case 'belt': {
         if (pausedBelts) break;
         if (g.isSnowball) {
-          if (!S.firstSnowballShown && !S.tut && g.x >= BUILD_X0 + 34) {
-            S.firstSnowballShown = true;
-            S.snowballBoxUp = true;
-            break;
-          }
           const inGustBelts = !S.gustBelts || S.gustBelts.includes(g.belt);
           const blown = g.gusted || (S.gustT > 0 && inGustBelts && g.x < gustFront());
           if (blown) {
@@ -1726,7 +1733,7 @@ function updateGifts(dt) {
         const effGustMul = g.gustMul || S.gustMul || wave().gustMul || GUST.beltMul;
         const strength = Math.max(0.45, Math.min(1.25, (effGustMul - 1.2) / 0.9));
         g.tilt = blown ? (0.10 + 0.08 * strength) : 0;
-        const beltSpd = TUNE.beltSpeed || 115;
+        const beltSpd = (S.tut || g.tutGift || g.tutWatch) ? 49 : (TUNE.beltSpeed || 115);
         g.x = Math.min(g.x + beltSpd * (blown ? effGustMul : beltSpeedMul) * dt, limit);
         if (!teetering[g.belt] && g.x >= TEETER_X - 0.5) {
           g.state = 'teeter'; g.timer = 0; teetering[g.belt] = g;
@@ -1740,7 +1747,7 @@ function updateGifts(dt) {
         const k = (g.tutGift && len > 100) ? 0.65 : Math.min(g.timer / len, 1);
         g.tilt = reduceMotion ? 0
           : Math.sin(g.timer * (3 + 11 * k * k) * Math.PI) * (0.06 + 0.30 * k * k);
-        if (g.timer >= len) { g.state = 'falling'; g.timer = 0; g.tilt = 0; }
+        if (!g.tutGift && g.timer >= len) { g.state = 'falling'; g.timer = 0; g.tilt = 0; }
         break;
       }
       case 'falling': {
@@ -1970,6 +1977,7 @@ function doAction(edge, manual) {
     S.tutBoxUp = true;
     S.tutTimer = 0;
     clearKeys();
+    ensureTutGift(0, 1);
   } else if (S.tut === 3) {
     S.tut = 4;
     S.tutBoxUp = true;
@@ -2435,6 +2443,23 @@ function tutGift(cat, belt = 0) {
   });
 }
 
+function ensureTutGift(cat, belt = 0) {
+  if (!S || !S.gifts) return;
+  const existing = S.gifts.find(g => g.tutGift && g.belt === belt && g.state !== 'carried');
+  if (existing) {
+    if (existing.state !== 'belt' && existing.state !== 'teeter') {
+      existing.state = 'belt';
+      existing.x = TEETER_X - 42;
+      existing.y = beltY(belt) - GIFT_R;
+      existing.timer = 0;
+      existing.tilt = 0;
+      existing.spin = 0;
+    }
+    return;
+  }
+  tutGift(cat, belt);
+}
+
 function tutWatchGift(cat) {
   S.gifts.push({
     id: S.nextId++, cat, v: 0, belt: 0, state: 'belt',
@@ -2467,7 +2492,9 @@ function tutFinish() {
 function tutDismissOk() {
   if (!S) return false;
   if (S.snowballBoxUp) {
+    if ((S.snowballBoxLockT || 0) > 0) return false;
     S.snowballBoxUp = false;
+    S.snowballBoxLockT = 0;
     api.play('pd_player_present_pickup');
     return true;
   }
@@ -2485,22 +2512,19 @@ function tutDismissOk() {
     S.tut = 2;
     S.tutBoxUp = true;
     S.tutTimer = 0;
+    ensureTutGift(1, 0);
     return true;
   }
   if (S.tut === 2) {
     S.tutBoxUp = false;
     S.tutTimer = 0;
-    if (!S.gifts.some(g => g.tutGift && g.belt === 0 && g.state !== 'carried')) {
-      tutGift(1, 0);
-    }
+    ensureTutGift(1, 0);
     return true;
   }
   if (S.tut === 3) {
     S.tutBoxUp = false;
     S.tutTimer = 0;
-    if (!S.gifts.some(g => g.tutGift && g.belt === 1 && g.state !== 'carried')) {
-      tutGift(0, 1);
-    }
+    ensureTutGift(0, 1);
     return true;
   }
   if (S.tut === 4) {
@@ -2525,6 +2549,11 @@ function tutDismissOk() {
 
 function updateTutorial(dt) {
   if (!S || !S.tut) return;
+  if (S.tut === 2 && S.elf.bag.length < 1) {
+    ensureTutGift(1, 0);
+  } else if (S.tut === 3 && S.elf.bag.length < 2) {
+    ensureTutGift(0, 1);
+  }
 }
 
 let last = 0, raf = 0;
@@ -2538,6 +2567,9 @@ function frame(now) {
     S.takeoff += dt;
   } else if (S && S.mode === 'play') {
     S.uiT = (S.uiT || 0) + dt;
+    if (S.snowballBoxUp && S.snowballBoxLockT > 0) {
+      S.snowballBoxLockT = Math.max(0, S.snowballBoxLockT - dt);
+    }
     const pausedByTutBox = Boolean((S.tut && S.tutBoxUp) || S.snowballBoxUp);
     if (!pausedByTutBox) {
       S.t += dt;
@@ -2636,7 +2668,8 @@ function onKeyDown(ev) {
       document.activeElement.blur();
       cv.focus({ preventScroll: true });
     }
-    if (!ev.repeat && ((S.tut && S.tutBoxUp) || S.snowballBoxUp) && tutDismissOk()) {
+    if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) {
+      if (!ev.repeat) tutDismissOk();
       ev.preventDefault();
       return;
     }
