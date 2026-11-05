@@ -17,7 +17,8 @@
 import '../../src/magic.js';
 import { _msg } from '../../src/magic.js';
 import {
-  ELVES, PROPS, ENDING, TUNE, SLEIGHS, GUST, CATS, CAT_UPPER,
+  ELVES, PROPS, ENDING, TUNE, SLEIGHS, SNOW, SNOW_BIG_FLAKES_FROM_WAVE, SNOW_MAX_GIFT_COVER,
+  GUST, CATS, CAT_UPPER,
   OPENS_AT_LABELS, HINT_CATCH, HINT_CHUTE, REVEAL_BANNER, TUT_FOOTERS,
   W, H, FLOOR_H, BUILD_X0, BUILD_X1, GROUND_Y, TAP_SPLIT, TEETER_X,
   DROP_X0, DROP_X1, CHUTE_BX, CHUTE_BW, CHUTE_BH, MACH_CX, MACH_W, MACH_H,
@@ -25,7 +26,7 @@ import {
   ELF_H, GIFT_R, BOX_X, BOX_Y, BOX_W, BOX_H, PAD_TOP, PAD_BOT, PAD_SIDE,
   feetY, beltY, chuteY, carryY, STARS_BG, HILLS_BG,
   PXS, CWS, CHS, GYS, PXC, SPR_SLEIGH, SPR_DEER_A, SPR_DEER_B,
-  CITY_FAR, CITY, MOON_X, MOON_Y, MOON_R, takeoffPath, TUT, tutHole,
+  CITY_FAR, CITY, MOON_X, MOON_Y, MOON_R, takeoffPath, TUT, SNOWBALL_TUT_BOX, tutHole,
 } from './constants.js';
 
 export const cv = document.getElementById('game');
@@ -468,10 +469,105 @@ function drawIconBadge(g2, cat, x, y, s, v = 0) {
   drawIcon(g2, cat, x, y, 1.02 * s, v);
 }
 
+function drawSnowballOnBelt(g2, g) {
+  const r = TUNE.snowballRadius || 21;
+  const sz = r * 2;
+  const ang = reduceMotion ? 0 : (g.spin || (g.x * 0.05));
+  const sbImg = PROPS.snowball && PROPS.snowball.img;
+  g2.save();
+  g2.rotate(ang);
+  if (sbImg && sbImg.complete && sbImg.naturalWidth) {
+    g2.drawImage(sbImg, -sz / 2, -sz / 2, sz, sz);
+  } else {
+    g2.fillStyle = '#FFFFFF';
+    g2.beginPath();
+    g2.arc(0, 0, r, 0, Math.PI * 2);
+    g2.fill();
+  }
+  g2.restore();
+}
+
+function drawHotCocoaOnBelt(g2, g) {
+  g2.save();
+  if (g.tilt) g2.rotate(g.tilt);
+
+  // Subtle shadow under the mug on the belt
+  g2.fillStyle = 'rgba(15,23,42,.24)';
+  g2.beginPath();
+  g2.ellipse(0, 17, 13, 4, 0, 0, Math.PI * 2);
+  g2.fill();
+
+  // Mug handle on the right (flat Santa Tracker style)
+  g2.strokeStyle = '#DC2626';
+  g2.lineWidth = 4.5;
+  g2.lineCap = 'round';
+  g2.beginPath();
+  g2.arc(10.5, 3, 6.5, -Math.PI * 0.45, Math.PI * 0.45);
+  g2.stroke();
+  g2.strokeStyle = '#1E293B';
+  g2.lineWidth = 1.6;
+  g2.beginPath();
+  g2.arc(10.5, 3, 8.2, -Math.PI * 0.45, Math.PI * 0.45);
+  g2.stroke();
+
+  // Mug body (warm festive red with darker right shade, no gift ring)
+  g2.fillStyle = '#DC2626';
+  g2.strokeStyle = '#1E293B';
+  g2.lineWidth = 2.0;
+  g2.beginPath();
+  g2.roundRect(-12, -8, 22, 24, [2, 2, 6, 6]);
+  g2.fill();
+  g2.stroke();
+
+  // Festive white stripe & dot on the mug
+  g2.fillStyle = '#FFFFFF';
+  g2.fillRect(-10.5, 2, 19, 3.5);
+  g2.beginPath();
+  g2.arc(-1, -2.5, 2.2, 0, Math.PI * 2);
+  g2.fill();
+
+  // Hot chocolate surface & tiny marshmallows at the rim
+  g2.fillStyle = '#78350F';
+  g2.strokeStyle = '#1E293B';
+  g2.lineWidth = 1.6;
+  g2.beginPath();
+  g2.ellipse(-1, -7.5, 10.5, 3.4, 0, 0, Math.PI * 2);
+  g2.fill();
+  g2.stroke();
+
+  g2.fillStyle = '#FFFFFF';
+  g2.fillRect(-5.5, -9.5, 4, 3);
+  g2.fillRect(0.5, -9.0, 3.5, 2.8);
+
+  // Little rising steam wisps above the mug
+  const wavePhase = reduceMotion ? 0 : (g.x * 0.08 + (g.timer || 0) * 5);
+  g2.strokeStyle = 'rgba(255,255,255,.88)';
+  g2.lineWidth = 2.2;
+  g2.lineCap = 'round';
+  for (const sx of [-4.5, 2.5]) {
+    const sw = Math.sin(wavePhase + sx) * 2.2;
+    g2.beginPath();
+    g2.moveTo(sx, -13);
+    g2.quadraticCurveTo(sx + sw, -18, sx - sw * 0.7, -23);
+    g2.stroke();
+  }
+  g2.restore();
+}
+
 function drawGift(g2, g) {
   g2.save();
   if (g.state === 'belt' && g.x < 44) { g2.beginPath(); g2.rect(18, 0, W, H); g2.clip(); }
   g2.translate(g.x, g.y);
+  if (g.isSnowball) {
+    drawSnowballOnBelt(g2, g);
+    g2.restore();
+    return;
+  }
+  if (g.isCocoa) {
+    drawHotCocoaOnBelt(g2, g);
+    g2.restore();
+    return;
+  }
   if (g.state === 'inBin') g2.scale(0.80, 0.80);
   if (g.tilt) g2.rotate(g.tilt);
   if (g.spin && (g.state === 'toBin' || g.state === 'landed')) g2.rotate(Math.sin(g.spin) * 0.28);
@@ -510,6 +606,44 @@ function drawElf(g2, S, e, elfChoice) {
   if (moving && e.facing < 0) g2.scale(-1, 1);
   g2.drawImage(im, -w / 2, -h, w, h);
   g2.restore();
+
+  // Snow-covered elf when catching a snowball: big snowball with head, arms, and legs sticking out
+  if (S && S.snowballHitT > 0) {
+    const dur = TUNE.snowballSlowTime || 2.5;
+    const frac = Math.min(1, Math.max(0, S.snowballHitT / dur));
+    const snowR = 14 + 7.5 * (0.45 + 0.55 * frac);
+    const cySnow = e.y + hop - h * 0.41;
+    const sbImg = PROPS.snowball && PROPS.snowball.img;
+    g2.save();
+    g2.translate(e.x, cySnow);
+
+    // Arms & mittens sticking out on both sides of the snowball
+    g2.strokeStyle = '#16A34A';
+    g2.lineWidth = 5.5;
+    g2.lineCap = 'round';
+    g2.beginPath();
+    g2.moveTo(-snowR + 3, -2);
+    g2.lineTo(-snowR - 8, 3);
+    g2.moveTo(snowR - 3, -2);
+    g2.lineTo(snowR + 8, 3);
+    g2.stroke();
+    g2.fillStyle = '#DC2626';
+    g2.beginPath();
+    g2.arc(-snowR - 8, 3, 4.2, 0, Math.PI * 2);
+    g2.arc(snowR + 8, 3, 4.2, 0, Math.PI * 2);
+    g2.fill();
+
+    // Big snowball covering torso (head above and legs below remain visible)
+    if (sbImg && sbImg.complete && sbImg.naturalWidth) {
+      g2.drawImage(sbImg, -snowR, -snowR, snowR * 2, snowR * 2);
+    } else {
+      g2.fillStyle = '#FFFFFF';
+      g2.beginPath();
+      g2.arc(0, 0, snowR, 0, Math.PI * 2);
+      g2.fill();
+    }
+    g2.restore();
+  }
 
   // Small frosty breath puff on each breath out during the break
   if (resting) {
@@ -712,7 +846,7 @@ function drawWorkshop(g2, S, floors) {
     const beltSel = S.cmd && S.cmd.type === 'belt' && S.cmd.floor === f;
     const beltQ = S.queue && S.queue.type === 'belt' && S.queue.floor === f;
     const tutBeltGlow = guide.beltFloor === f;
-    const liveHere = canCarryMore && S.gifts.some(g => g.belt === f &&
+    const liveHere = canCarryMore && S.gifts.some(g => g.belt === f && !g.isSnowball &&
       (g.state === 'belt' || g.state === 'teeter' || g.state === 'falling'));
     if (beltSel || tutBeltGlow || S.beltPulse[f] > 0) {
       g2.fillStyle = tutBeltGlow ? 'rgba(253,224,71,.24)' : (beltSel ? 'rgba(43,127,217,.16)' : 'rgba(42,157,92,.16)');
@@ -734,7 +868,7 @@ function drawWorkshop(g2, S, floors) {
 
     drawFloorBelt(g2, S, f);
 
-    const liveDrop = S.gifts.some(g => g.belt === f && (g.state === 'teeter' || g.state === 'falling'));
+    const liveDrop = S.gifts.some(g => g.belt === f && !g.isSnowball && (g.state === 'teeter' || g.state === 'falling'));
     if (liveDrop) {
       g2.strokeStyle = '#1B69C1';
       g2.lineWidth = 2.6;
@@ -989,12 +1123,53 @@ function drawSnow(g2, S) {
   if (S.snowAmt < 0.01) return;
   g2.save();
   g2.fillStyle = '#FFFFFF';
-  const n = Math.min(S.snow.length, Math.round(S.snow.length * Math.min(0.55, 0.12 + S.snowAmt * 0.20)));
+  const maxFall = SNOW[SNOW.length - 1] ? SNOW[SNOW.length - 1].fall : 2.20;
+  const norm = Math.min(1, S.snowAmt / maxFall);
+  const n = Math.min(S.snow.length, Math.max(14, Math.round(S.snow.length * (0.12 + 0.88 * norm))));
+  const bigFlakesOn = ((S.sleighsDone || 0) + 1) >= (SNOW_BIG_FLAKES_FROM_WAVE || 5);
+  const giftArea = Math.PI * GIFT_R * GIFT_R;
+  const maxCoverArea = giftArea * (SNOW_MAX_GIFT_COVER || 0.32);
+  const visGifts = [];
+  if (S.gifts) {
+    for (const g of S.gifts) {
+      if (g.state === 'done') continue;
+      visGifts.push({ x: g.x, y: g.y, cover: 0 });
+    }
+  }
   for (let i = 0; i < n; i++) {
     const s = S.snow[i];
-    g2.globalAlpha = Math.min(1, s.a * (0.55 + S.snowAmt * 0.35));
+    let r = (bigFlakesOn && s.large) ? (s.bigR || s.r * 1.8) : (s.baseR || s.r);
+    let blocked = false;
+    for (let gi = 0; gi < visGifts.length; gi++) {
+      const vg = visGifts[gi];
+      const dx = s.x - vg.x;
+      const dy = s.y - vg.y;
+      if (dx * dx + dy * dy < (GIFT_R + r) * (GIFT_R + r)) {
+        const flakeArea = Math.PI * r * r;
+        if (vg.cover + flakeArea > maxCoverArea) {
+          const remArea = maxCoverArea - vg.cover;
+          if (remArea >= Math.PI * 1.2 * 1.2) {
+            r = Math.min(r, Math.sqrt(remArea / Math.PI));
+          } else {
+            blocked = true;
+            break;
+          }
+        }
+      }
+    }
+    if (blocked) continue;
+    const usedArea = Math.PI * r * r;
+    for (let gi = 0; gi < visGifts.length; gi++) {
+      const vg = visGifts[gi];
+      const dx = s.x - vg.x;
+      const dy = s.y - vg.y;
+      if (dx * dx + dy * dy < (GIFT_R + r) * (GIFT_R + r)) {
+        vg.cover += usedArea;
+      }
+    }
+    g2.globalAlpha = Math.min(0.92, s.a * (0.50 + norm * 0.42));
     g2.beginPath();
-    g2.arc(s.x, s.y, s.r, 0, 7);
+    g2.arc(s.x, s.y, r, 0, 7);
     g2.fill();
   }
   g2.restore();
@@ -1003,16 +1178,18 @@ function drawSnow(g2, S) {
 function drawWind(g2, S, g) {
   if (g.state === 'belt' && g.x < 18) return;
   const k = 1 - Math.abs(S.gustT / GUST.dur - 0.5) * 2;
+  const mul = g.gustMul || S.gustMul || GUST.beltMul;
+  const strength = Math.max(0.55, Math.min(1.30, (mul - 1.15) / 0.95));
   g2.save(); g2.lineCap = 'round';
   for (let i = 0; i < 3; i++) {
     const off = (i - 1) * 9;
     const ph = (S.t * 2.4 + i * 0.41) % 1;
     const taper = 1 - Math.abs(off) / 22;
-    const len = (14 + 28 * taper) * (0.65 + 0.35 * Math.sin(S.t * 9 + i));
+    const len = (14 + 28 * taper) * strength * (0.65 + 0.35 * Math.sin(S.t * 9 + i));
     const x = g.x - 18 - ph * 18;
-    g2.globalAlpha = 0.8 * k * taper * (1 - ph * 0.55);
+    g2.globalAlpha = 0.8 * k * strength * taper * (1 - ph * 0.55);
     g2.strokeStyle = i === 1 ? '#FFFFFF' : '#C1E8ED';
-    g2.lineWidth = 1.4 + 1.4 * taper;
+    g2.lineWidth = (1.4 + 1.4 * taper) * Math.min(1.15, 0.75 + 0.35 * strength);
     g2.beginPath();
     g2.moveTo(x - len, g.y + off);
     g2.lineTo(x, g.y + off * 0.75);
@@ -1025,6 +1202,8 @@ function drawGust(g2, S) {
   if ((S.gustT <= 0 && S.gustWarnT <= 0) || reduceMotion) return;
   g2.save();
   g2.lineCap = 'round';
+  const mul = S.gustMul || GUST.beltMul;
+  const strength = Math.max(0.55, Math.min(1.30, (mul - 1.15) / 0.95));
 
   // 1s before each gust: snow streaks sweeping in from the left as a warning
   if (S.gustWarnT > 0 && S.gustT <= 0) {
@@ -1032,14 +1211,15 @@ function drawGust(g2, S) {
     const prog = Math.min(1, Math.max(0, 1 - S.gustWarnT / warnDur));
     const sweepRight = viewX0 + (TEETER_X + 90 - viewX0) * (0.35 + 0.65 * prog);
     const kWarn = Math.sin(prog * Math.PI);
-    for (let i = 0; i < 16; i++) {
+    const nWarn = Math.round(10 + 8 * strength);
+    for (let i = 0; i < nWarn; i++) {
       const y = (i * 139) % (H - 30) + 15;
-      const len = 44 + (i % 4) * 28;
+      const len = (44 + (i % 4) * 28) * strength;
       const x = viewX0 - 60 + ((S.t * 620 + i * 97) % Math.max(180, sweepRight - viewX0 + 80));
       if (x > sweepRight) continue;
-      g2.globalAlpha = (0.35 + 0.50 * kWarn) * Math.max(0.2, 1 - (sweepRight - x) / 320);
+      g2.globalAlpha = (0.35 + 0.50 * kWarn) * Math.min(1, 0.7 + 0.3 * strength) * Math.max(0.2, 1 - (sweepRight - x) / 320);
       g2.strokeStyle = i % 2 === 0 ? '#FFFFFF' : '#BAE6FD';
-      g2.lineWidth = 2.2 + (i % 2) * 1.0;
+      g2.lineWidth = 2.0 + (i % 2) * 1.0;
       g2.beginPath();
       g2.moveTo(x - len, y - 2);
       g2.lineTo(x, y + 2);
@@ -1051,18 +1231,19 @@ function drawGust(g2, S) {
 
   const front = gustFront(S);
   const k = Math.min(1, S.gustT / (GUST.dur * 0.35));
-  for (let i = 0; i < 20; i++) {
+  const nStreaks = Math.round(12 + 10 * strength);
+  for (let i = 0; i < nStreaks; i++) {
     const y = (i * 149) % (H - 20) + 10;
-    const len = 64 + (i % 4) * 38;
+    const len = (64 + (i % 4) * 38) * strength;
     const x = ((S.t * 820 + i * 137) % (W + 520)) - 260;
     if (x > front) continue;
     const near = Math.max(0, 1 - (front - x) / 420);
-    g2.globalAlpha = 0.82 * k * (0.25 + near * 0.75);
+    g2.globalAlpha = 0.82 * k * Math.min(1, 0.65 + 0.35 * strength) * (0.25 + near * 0.75);
     g2.strokeStyle = i % 3 ? '#C1E8ED' : '#FFFFFF';
-    g2.lineWidth = 2.2 + (i % 2) * 1.2;
+    g2.lineWidth = 2.0 + (i % 2) * 1.2;
     g2.beginPath(); g2.moveTo(x - len, y); g2.lineTo(x, y + 2); g2.stroke();
   }
-  g2.globalAlpha = 0.08 * k; g2.fillStyle = '#BFDBFE';
+  g2.globalAlpha = 0.08 * k * strength; g2.fillStyle = '#BFDBFE';
   g2.fillRect(viewX0 - 40, viewY0 - 40, (viewX1 - viewX0) + 80, (viewY1 - viewY0) + 80);
   g2.restore();
 }
@@ -1319,6 +1500,7 @@ export const TUT_OK_RECT = { x: 280, y: 194, w: 108, h: 36 };
 function getActiveTextBox(S) {
   if (!S) return null;
   if (S.tut && S.tutBoxUp) return TUT[S.tut - 1] || null;
+  if (S.snowballBoxUp) return SNOWBALL_TUT_BOX;
   return null;
 }
 
@@ -1409,20 +1591,27 @@ function drawTuneSpeedHud(g2, S) {
   if (!S || !S.tuneMode) return;
   const sleighNum = Math.min(SLEIGHS.length, (S.sleighsDone || 0) + 1);
   const timerStr = (S.sleighTimer || 0).toFixed(1);
-  const runSpd = Math.round(TUNE.runSpeed || 1200);
-  const climbSpd = Math.round(TUNE.climbSpeed || 700);
-  const pct = Math.round(TUNE.speedPct || 100);
+  const slowed = S.snowballHitT > 0;
+  const spdMul = slowed ? (TUNE.snowballSlowMul || 0.5) : 1.0;
+  const runSpd = Math.round((TUNE.runSpeed || 1200) * spdMul);
+  const climbSpd = Math.round((TUNE.climbSpeed || 700) * spdMul);
+  const pct = Math.round((TUNE.speedPct || 100) * spdMul);
   const live = Math.round(S.liveSpeed || 0);
-  const label = `Sleigh ${sleighNum}/${SLEIGHS.length}: ${timerStr}s · Speed: ${runSpd}/${climbSpd} px/s (${pct}%) · Live ${live} px/s`;
+  const isMouse = S.inputMode === 'mouse';
+  const modeName = isMouse ? 'Mouse' : 'Touch';
+  const mulStr = isMouse ? '×1.15' : '×1.00';
+  const tapNum = S.inputTapCount || 0;
+  const slowTag = slowed ? ` [SNOWBALL ½ SPEED ${S.snowballHitT.toFixed(1)}s]` : '';
+  const label = `Input: ${modeName} (${mulStr}) [tap #${tapNum}] · Sleigh ${sleighNum}/${SLEIGHS.length}: ${timerStr}s · Speed: ${runSpd}/${climbSpd} px/s (${pct}%)${slowTag} · Live ${live} px/s`;
 
   g2.save();
   g2.font = "bold 13px 'Google Sans',monospace,sans-serif";
-  const w = Math.max(360, g2.measureText(label).width + 24);
-  const x = 184;
+  const w = Math.max(410, g2.measureText(label).width + 24);
+  const x = Math.round((BUILD_X0 + BUILD_X1) / 2 - w / 2);
   const y = 14;
-  g2.fillStyle = 'rgba(15,23,42,.88)';
-  g2.strokeStyle = '#38BDF8';
-  g2.lineWidth = 2;
+  g2.fillStyle = slowed ? 'rgba(12,74,110,.94)' : 'rgba(15,23,42,.90)';
+  g2.strokeStyle = slowed ? '#7DD3FC' : (isMouse ? '#4ADE80' : '#38BDF8');
+  g2.lineWidth = 2.2;
   g2.beginPath();
   g2.roundRect(x, y, w, 28, 8);
   g2.fill();
@@ -1432,6 +1621,27 @@ function drawTuneSpeedHud(g2, S) {
   g2.textAlign = 'left';
   g2.textBaseline = 'middle';
   g2.fillText(label, x + 12, y + 14);
+  g2.restore();
+}
+
+function drawMixCornerTag(g2, S) {
+  if (!S || !S.mixLetter) return;
+  g2.save();
+  g2.font = "bold 13px 'Google Sans',sans-serif";
+  const txt = S.mixLetter;
+  const x = W - 26;
+  const y = H - 18;
+  g2.fillStyle = 'rgba(15,23,42,.78)';
+  g2.strokeStyle = 'rgba(255,255,255,.45)';
+  g2.lineWidth = 1.6;
+  g2.beginPath();
+  g2.roundRect(x - 14, y - 12, 28, 24, 6);
+  g2.fill();
+  g2.stroke();
+  g2.fillStyle = '#F8FAFC';
+  g2.textAlign = 'center';
+  g2.textBaseline = 'middle';
+  g2.fillText(txt, x, y + 0.5);
   g2.restore();
 }
 
@@ -1498,11 +1708,29 @@ export function renderScene(S, elfChoice, floors, sleighTargetVal, canCatch) {
   }
   cx.globalAlpha = 1;
 
+  if (Array.isArray(S.popups)) {
+    cx.save();
+    cx.font = "bold 20px 'Google Sans',sans-serif";
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    for (const pop of S.popups) {
+      const alpha = Math.max(0, Math.min(1, 1 - pop.age / (pop.life || 1)));
+      cx.globalAlpha = alpha;
+      cx.strokeStyle = '#0F172A';
+      cx.lineWidth = 4.5;
+      cx.strokeText(pop.text, pop.x, pop.y);
+      cx.fillStyle = '#FDE047';
+      cx.fillText(pop.text, pop.x, pop.y);
+    }
+    cx.restore();
+  }
+
   drawSnow(cx, S);
   drawGust(cx, S);
 
   drawGuideArrows(cx, S);
   drawTutorialBox(cx, S);
   drawTuneSpeedHud(cx, S);
+  drawMixCornerTag(cx, S);
   cx.restore();
 }
