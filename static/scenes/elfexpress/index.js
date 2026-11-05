@@ -898,318 +898,513 @@ function verifyOneHandMisses(q, teeter, startFloor = 0, startX = DROP_CX, timeMu
   return misses;
 }
 
+const BELT_CAP_BY_WAVE = [4, 5, 5, 6, 6, 7, 7, 8];
+const BUILD_UP_DUR = 8.0;
+const BREATHER_DUR = 2.0;
+
+function beltCapForWave(waveIdx = S ? S.sleighsDone : 0) {
+  return BELT_CAP_BY_WAVE[Math.max(0, Math.min(BELT_CAP_BY_WAVE.length - 1, waveIdx))];
+}
+
+function shuffleBag(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
+function refillFloorBag(sp, anchorFloor = -1, forbidFloor = -1) {
+  const n = sp.curFloors;
+  const bag = [];
+  for (let f = 0; f < n; f++) bag.push(f);
+  if (sp.waveIdx <= 1 && anchorFloor >= 0 && anchorFloor < n && anchorFloor !== forbidFloor) {
+    bag.push(anchorFloor);
+  }
+  shuffleBag(bag);
+  if (sp.maxFloorRun < 2 && sp.lastFloor >= 0 && sp.lastFloor < n && sp.floorRunLen === 1) {
+    const idx = bag.indexOf(sp.lastFloor);
+    if (idx > 0) {
+      bag.splice(idx, 1);
+      bag.unshift(sp.lastFloor);
+    }
+  }
+  sp.floorBag = bag;
+}
+
+function drawFloorFromBag(sp, anchorFloor = -1, avoidFloor = -1, preferDist = -1) {
+  const n = sp.curFloors;
+  sp.floorBag = sp.floorBag.filter(f => f < n);
+  const forbidRepeat = sp.floorRunLen >= 2 ? sp.lastFloor : -1;
+  if (!sp.floorBag.length) {
+    refillFloorBag(sp, anchorFloor, forbidRepeat);
+  }
+
+  const maxDist = preferDist >= 0 ? preferDist : (sp.waveIdx <= 1 ? 1 : -1);
+  let chosenIdx = -1;
+  if (maxDist >= 0 && anchorFloor >= 0) {
+    for (let i = 0; i < sp.floorBag.length; i++) {
+      const f = sp.floorBag[i];
+      if (f !== forbidRepeat && f !== avoidFloor && Math.abs(f - anchorFloor) <= maxDist) {
+        chosenIdx = i;
+        break;
+      }
+    }
+  }
+  if (chosenIdx < 0) {
+    for (let i = 0; i < sp.floorBag.length; i++) {
+      const f = sp.floorBag[i];
+      if (f !== forbidRepeat && f !== avoidFloor) {
+        chosenIdx = i;
+        break;
+      }
+    }
+  }
+
+  let b;
+  if (chosenIdx >= 0) {
+    b = sp.floorBag.splice(chosenIdx, 1)[0];
+  } else {
+    const cands = [];
+    for (let f = 0; f < n; f++) {
+      if (f !== forbidRepeat && f !== avoidFloor) cands.push(f);
+    }
+    if (!cands.length) {
+      for (let f = 0; f < n; f++) {
+        if (f !== forbidRepeat) cands.push(f);
+      }
+    }
+    b = cands.length ? cands[Math.floor(Math.random() * cands.length)] : 0;
+  }
+
+  if (b === sp.lastFloor) {
+    sp.floorRunLen++;
+  } else {
+    sp.lastFloor = b;
+    sp.floorRunLen = 1;
+  }
+  if (sp.floorRunLen > sp.maxFloorRun) sp.maxFloorRun = sp.floorRunLen;
+  return b;
+}
+
+function refillCatBag(sp, beltFloor = -1, forbidCat = -1) {
+  const n = sp.curFloors;
+  const bag = [];
+  for (let c = 0; c < n; c++) bag.push(c);
+  const sameProb = sp.w.sameCatProb || 0;
+  if (sp.lastCat >= 0 && sp.lastCat < n && sp.lastCat !== forbidCat && Math.random() < sameProb) {
+    bag.push(sp.lastCat);
+  } else if (sp.waveIdx <= 1 && beltFloor >= 0 && beltFloor < n && beltFloor !== forbidCat && Math.random() < sameProb) {
+    bag.push(beltFloor);
+  }
+  shuffleBag(bag);
+  sp.catBag = bag;
+}
+
+function drawCatFromBag(sp, beltFloor = -1, preferDist = -1) {
+  const n = sp.curFloors;
+  sp.catBag = sp.catBag.filter(c => c < n);
+  const forbidRepeat = sp.catRunLen >= 2 ? sp.lastCat : -1;
+  if (!sp.catBag.length) {
+    refillCatBag(sp, beltFloor, forbidRepeat);
+  }
+
+  const maxDist = preferDist >= 0 ? preferDist : (sp.waveIdx <= 1 ? 1 : -1);
+  let chosenIdx = -1;
+  if (sp.lastCat >= 0 && sp.lastCat < n && sp.lastCat !== forbidRepeat && Math.random() < (sp.w.sameCatProb || 0)) {
+    const sameIdx = sp.catBag.indexOf(sp.lastCat);
+    if (sameIdx >= 0 && (maxDist < 0 || Math.abs(sp.lastCat - beltFloor) <= maxDist)) {
+      chosenIdx = sameIdx;
+    }
+  }
+  if (chosenIdx < 0 && maxDist >= 0 && beltFloor >= 0) {
+    for (let i = 0; i < sp.catBag.length; i++) {
+      const c = sp.catBag[i];
+      if (c !== forbidRepeat && Math.abs(c - beltFloor) <= maxDist) {
+        chosenIdx = i;
+        break;
+      }
+    }
+  }
+  if (chosenIdx < 0) {
+    for (let i = 0; i < sp.catBag.length; i++) {
+      if (sp.catBag[i] !== forbidRepeat) {
+        chosenIdx = i;
+        break;
+      }
+    }
+  }
+
+  let c;
+  if (chosenIdx >= 0) {
+    c = sp.catBag.splice(chosenIdx, 1)[0];
+  } else {
+    const cands = [];
+    for (let i = 0; i < n; i++) {
+      if (i !== forbidRepeat) cands.push(i);
+    }
+    c = cands.length ? cands[Math.floor(Math.random() * cands.length)] : 0;
+  }
+
+  if (c === sp.lastCat) {
+    sp.catRunLen++;
+  } else {
+    sp.lastCat = c;
+    sp.catRunLen = 1;
+  }
+  return c;
+}
+
+function spawnerIntervalAt(sp, t = sp.clock) {
+  const u = Math.min(1, Math.max(0, t / sp.curveHorizon));
+  return sp.startGap + (sp.endGap - sp.startGap) * u;
+}
+
+function checkSpawnerProgressiveFloor(sp) {
+  if (!sp.w.progressiveFloors) return 0;
+  const match = sp.w.progressiveFloors.find(p => p.atGift === sp.giftsSpawned);
+  if (match && match.floors > sp.curFloors) {
+    sp.curFloors = match.floors;
+    return match.floors;
+  }
+  return 0;
+}
+
+function createWaveSpawner(waveIdx, startFloor = 0) {
+  const w = WAVES[Math.min(waveIdx, WAVES.length - 1)];
+  const target = SLEIGHS[Math.min(waveIdx, SLEIGHS.length - 1)];
+  const startGap = w.flowGap;
+  const endGap = w.burstGap || w.speedUpGap || w.flowGap;
+  const avgGap = (startGap + endGap) * 0.5;
+  const curFloors = w.startFloors || w.floors || 2;
+  const wantSnowballs = w.snowballs || 0;
+  const snowballSlots = [];
+  if (wantSnowballs === 1) {
+    snowballSlots.push({ cycle: 0, buildT: 4.8 });
+  } else if (wantSnowballs === 2) {
+    snowballSlots.push({ cycle: 0, buildT: 4.2 }, { cycle: 0, buildT: 6.7 });
+  } else if (wantSnowballs === 3) {
+    snowballSlots.push({ cycle: 0, buildT: 4.2 }, { cycle: 0, buildT: 6.7 }, { cycle: 1, buildT: 4.2 });
+  } else if (wantSnowballs >= 4) {
+    snowballSlots.push(
+      { cycle: 0, buildT: 4.2 },
+      { cycle: 0, buildT: 6.7 },
+      { cycle: 1, buildT: 4.2 },
+      { cycle: 1, buildT: 6.7 }
+    );
+  }
+  return {
+    waveIdx,
+    w,
+    target,
+    startGap,
+    endGap,
+    curveHorizon: Math.max(8, target * avgGap),
+    beltCap: beltCapForWave(waveIdx),
+    peakSize: waveIdx >= 4 ? 4 : 3,
+    curFloors,
+    floorBag: [],
+    catBag: [],
+    lastFloor: -1,
+    floorRunLen: 0,
+    maxFloorRun: 0,
+    lastCat: Math.max(0, Math.min(curFloors - 1, startFloor)),
+    catRunLen: 0,
+    clock: 0,
+    nomClock: 0,
+    cycleStartClock: 0.10,
+    stage: 'preseed',
+    cycleIdx: 0,
+    cycleBuildT: 0,
+    peakRemaining: 0,
+    pairDoneInCycle: false,
+    pairsSpawned: 0,
+    gustsSpawned: 0,
+    snowballsSpawned: 0,
+    snowballSlots,
+    peakTimes: [],
+    giftsSpawned: 0,
+    pendingJitter: 0,
+    postBreatherHold: 0,
+    heldTime: 0,
+  };
+}
+
+function generateNextSpawnerEvents(sp, missesSoFar = 0) {
+  const events = [];
+  const w = sp.w;
+  const goalGifts = sp.target + missesSoFar;
+
+  if (sp.stage === 'preseed') {
+    const preN = sp.waveIdx === 0 ? 1 : 2;
+    const prePositions = preN === 1 ? [78] : [88, 32];
+    for (let i = 0; i < preN; i++) {
+      const unlocked = checkSpawnerProgressiveFloor(sp);
+      const avoidF = i === 1 && events.length ? events[0].belt : -1;
+      const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, avoidF);
+      const c = drawCatFromBag(sp, b);
+      const delay = i === 0 ? 0.04 : 0.06;
+      sp.clock += delay;
+      sp.nomClock += delay;
+      sp.giftsSpawned++;
+      events.push({
+        delay,
+        delayType: 'init',
+        phase: 'flow',
+        action: 'gift',
+        belt: b,
+        cat: c,
+        startX: prePositions[i],
+        unlockFloor: unlocked,
+        gusted: false,
+      });
+    }
+    sp.stage = 'buildup';
+    sp.cycleBuildT = 0;
+    sp.cycleStartClock = sp.nomClock;
+    sp.pairDoneInCycle = false;
+    return events;
+  }
+
+  // Once the goal number of gifts has already been released onto the belts, keep releasing at steady endGap until the sleigh fills
+  if (sp.giftsSpawned >= goalGifts && sp.stage !== 'peak') {
+    const extraHold = sp.postBreatherHold || 0;
+    sp.postBreatherHold = 0;
+    const delay = sp.endGap + extraHold;
+    const unlocked = checkSpawnerProgressiveFloor(sp);
+    const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, -1, 1);
+    const c = drawCatFromBag(sp, b, 1);
+    sp.clock += delay;
+    sp.nomClock += delay;
+    sp.giftsSpawned++;
+    events.push({
+      delay,
+      delayType: 'flow',
+      phase: 'flow',
+      action: 'gift',
+      belt: b,
+      cat: c,
+      startX: -26,
+      unlockFloor: unlocked,
+      gusted: false,
+    });
+    return events;
+  }
+
+  if (sp.stage === 'peak') {
+    const baseGap = spawnerIntervalAt(sp, sp.cycleStartClock + BUILD_UP_DUR);
+    const peakGap = Number((baseGap * 0.5).toFixed(3));
+    const isPeakStart = sp.peakRemaining === sp.peakSize;
+    const unlocked = checkSpawnerProgressiveFloor(sp);
+    const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, -1, 1);
+    const c = drawCatFromBag(sp, b, 1);
+    sp.clock += peakGap;
+    sp.nomClock += peakGap;
+    sp.giftsSpawned++;
+    sp.peakRemaining--;
+    events.push({
+      delay: peakGap,
+      delayType: 'burst',
+      phase: 'burst',
+      action: 'gift',
+      belt: b,
+      cat: c,
+      startX: -26,
+      unlockFloor: unlocked,
+      gusted: false,
+      isPeakGift: true,
+      isPeakStart,
+      peakClock: isPeakStart ? Number((sp.nomClock - peakGap).toFixed(2)) : 0,
+    });
+    if (sp.peakRemaining <= 0) {
+      sp.stage = 'buildup';
+      sp.cycleIdx++;
+      sp.cycleBuildT = 0;
+      sp.pairDoneInCycle = false;
+      sp.pendingJitter = 0;
+      sp.postBreatherHold = BREATHER_DUR;
+      sp.cycleStartClock = sp.nomClock + BREATHER_DUR;
+    }
+    return events;
+  }
+
+  // Stage is 'buildup'
+  const extraHold = sp.postBreatherHold || 0;
+  sp.postBreatherHold = 0;
+  if (extraHold > 0) {
+    sp.nomClock += extraHold;
+  }
+
+  const nomBuildT = sp.nomClock - sp.cycleStartClock;
+  const baseGap = spawnerIntervalAt(sp, sp.nomClock);
+  const remBuild = (sp.cycleStartClock + BUILD_UP_DUR) - sp.nomClock;
+  const nearGoal = sp.giftsSpawned >= goalGifts - 3 ? 1 : -1;
+
+  // Check if we should spawn the single pair (and optional gust) for this build-up cycle
+  const canPair = !sp.pairDoneInCycle &&
+    sp.pairsSpawned < (w.pairs || 0) &&
+    sp.curFloors >= 2 &&
+    sp.giftsSpawned + 2 < goalGifts &&
+    nomBuildT >= 1.5 &&
+    remBuild >= baseGap * 1.45;
+
+  if (canPair) {
+    sp.pairDoneInCycle = true;
+    sp.pairsSpawned++;
+    const useGust = sp.gustsSpawned < (w.gusts || 0);
+    if (useGust) sp.gustsSpawned++;
+
+    const unlocked1 = checkSpawnerProgressiveFloor(sp);
+    const b1 = unlocked1 ? (unlocked1 - 1) : drawFloorFromBag(sp, sp.lastCat, -1, 1);
+    const c1 = drawCatFromBag(sp, b1, 1);
+    const pairLag = useGust ? 0.24 : 0.22;
+    const nomPairStep = Math.max(0.28 + pairLag, baseGap);
+    const delay1 = Math.max(0.28, nomPairStep - pairLag - sp.pendingJitter) + extraHold;
+    sp.pendingJitter = 0;
+    sp.clock += delay1;
+    sp.nomClock += nomPairStep - pairLag;
+    sp.cycleBuildT = sp.nomClock - sp.cycleStartClock;
+    sp.giftsSpawned++;
+
+    const unlocked2 = checkSpawnerProgressiveFloor(sp);
+    const b2 = unlocked2 ? (unlocked2 - 1) : drawFloorFromBag(sp, c1, b1, 1);
+    const c2 = sp.waveIdx <= 1 ? c1 : drawCatFromBag(sp, b2, 1);
+    sp.clock += pairLag;
+    sp.nomClock += pairLag;
+    sp.cycleBuildT = sp.nomClock - sp.cycleStartClock;
+    sp.giftsSpawned++;
+
+    const mul = w.gustMul || GUST.beltMul || 1.95;
+    const beltSpd = TUNE.beltSpeed || 115;
+    const travelNormal = (TEETER_X - (-26)) / beltSpd;
+    const gustStartX = useGust
+      ? Math.min(-26, Math.round(TEETER_X - travelNormal * beltSpd * mul))
+      : -26;
+
+    events.push({
+      delay: delay1,
+      delayType: 'flow',
+      phase: 'flow',
+      action: 'gift',
+      belt: b1,
+      cat: c1,
+      startX: -26,
+      unlockFloor: unlocked1,
+      paired: true,
+      gustLead: useGust,
+      warnDur: useGust ? Math.max(GUST.warnTime || 1.0, pairLag) : 0,
+      warnBelts: useGust ? [b2, b1] : null,
+      gusted: false,
+    });
+    events.push({
+      delay: pairLag,
+      delayType: 'flow',
+      phase: 'flow',
+      action: 'gift',
+      belt: b2,
+      cat: c2,
+      startX: gustStartX,
+      unlockFloor: unlocked2,
+      paired: true,
+      isPairSecond: true,
+      gusted: useGust,
+      gustMul: useGust ? mul : 0,
+      triggerGust: useGust,
+      gustBelts: useGust ? [b2] : null,
+    });
+    return events;
+  }
+
+  // Normal build-up gift with paired +/-6% jitter (within +/-10%) and exact clamp to 8.0s peak start
+  let nomStep;
+  let stepGap;
+  if (remBuild <= baseGap * 1.45 || sp.giftsSpawned + 1 === goalGifts) {
+    nomStep = sp.giftsSpawned + 1 === goalGifts && remBuild > baseGap * 1.45 ? baseGap : remBuild;
+    stepGap = nomStep - sp.pendingJitter;
+    sp.pendingJitter = 0;
+  } else if (sp.pendingJitter !== 0) {
+    nomStep = baseGap;
+    stepGap = baseGap - sp.pendingJitter;
+    sp.pendingJitter = 0;
+  } else if (remBuild >= baseGap * 2.85 && sp.giftsSpawned + 2 < goalGifts) {
+    nomStep = baseGap;
+    const jSec = ((Math.random() * 0.12) - 0.06) * baseGap;
+    sp.pendingJitter = jSec;
+    stepGap = baseGap + jSec;
+  } else {
+    nomStep = baseGap;
+    stepGap = baseGap;
+  }
+
+  const delay = stepGap + extraHold;
+  const unlocked = checkSpawnerProgressiveFloor(sp);
+  const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, -1, nearGoal);
+  const c = drawCatFromBag(sp, b, nearGoal);
+  sp.clock += delay;
+  sp.nomClock += nomStep;
+  sp.cycleBuildT = sp.nomClock - sp.cycleStartClock;
+  sp.giftsSpawned++;
+  const phase = sp.cycleBuildT >= BUILD_UP_DUR * 0.55 ? 'speedup' : 'flow';
+
+  events.push({
+    delay,
+    delayType: phase,
+    phase,
+    action: 'gift',
+    belt: b,
+    cat: c,
+    startX: -26,
+    unlockFloor: unlocked,
+    gusted: false,
+  });
+
+  if (sp.cycleBuildT >= BUILD_UP_DUR - 1e-4 && sp.giftsSpawned <= goalGifts) {
+    sp.stage = 'peak';
+    sp.peakRemaining = sp.peakSize;
+  }
+
+  return events;
+}
+
 function buildWaveQueue(waveIdx) {
   const w = WAVES[Math.min(waveIdx, WAVES.length - 1)];
   const maxFloors = w.floors || 2;
   const carryCap = 2;
   const startFloor = (S && S.elf) ? Math.min(maxFloors - 1, S.elf.floor) : 0;
   const startX = (S && S.elf) ? S.elf.x : DROP_CX;
-  const minSpare = (TUNE.minSpareByWave && TUNE.minSpareByWave[waveIdx] !== undefined)
-    ? TUNE.minSpareByWave[waveIdx]
-    : 0.60;
 
-  let bestQ = null, bestPrevB = S.lastBelt, bestPrevC = S.lastCat || 0, bestSlack = -Infinity;
-
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const q = [];
-    let curFloors = w.startFloors || maxFloors;
-    let prevB = S.lastBelt >= 0 ? Math.min(curFloors - 1, S.lastBelt) : 0;
-    let prevC = Math.min(curFloors - 1, S.lastCat || 0);
-    let giftIdx = 0;
-
-    const checkProgressiveFloor = () => {
-      if (!w.progressiveFloors) return 0;
-      const match = w.progressiveFloors.find(p => p.atGift === giftIdx);
-      if (match) {
-        curFloors = match.floors;
-        return match.floors;
-      }
-      return 0;
+  // Single-pass check for verifyWaveSolvable (no 40-attempt retry loop)
+  const checkSp = createWaveSpawner(waveIdx, startFloor);
+  const checkQ = [];
+  while (checkSp.giftsSpawned < checkSp.target) {
+    const evs = generateNextSpawnerEvents(checkSp);
+    for (const ev of evs) {
+      checkQ.push(ev);
+      if (checkSp.giftsSpawned >= checkSp.target && !ev.paired) break;
+    }
+  }
+  const slackTouch = verifyWaveSolvable(checkQ, w.teeter, carryCap, startFloor, startX, 1.0);
+  const slackMouse = verifyWaveSolvable(checkQ, w.teeter, carryCap, startFloor, startX, TUNE.mouseTimeMul || 1.15);
+  if (S) {
+    if (!S.waveSolvableReport) S.waveSolvableReport = [];
+    S.waveSolvableReport[waveIdx] = {
+      wave: waveIdx + 1,
+      slackTouch: Number(slackTouch.toFixed(2)),
+      slackMouse: Number(slackMouse.toFixed(2)),
     };
-
-    const totalSingle = w.flowCount + (w.speedUpCount || 0) + (w.burstSize || 0);
-    for (let i = 0; i < totalSingle; i++) {
-      const unlocked = checkProgressiveFloor();
-      const phase = i < w.flowCount ? 'flow' : (i < w.flowCount + (w.speedUpCount || 0) ? 'speedup' : 'burst');
-      const gap = phase === 'flow' ? w.flowGap : (phase === 'speedup' ? (w.speedUpGap || w.flowGap) : w.burstGap);
-      const b = unlocked ? (unlocked - 1) : pickNearbyFloor(i === 0 ? startFloor : prevC, 1, prevB, curFloors);
-      let c;
-      if (Math.random() < (w.sameCatProb || 0) && Math.abs(prevC - b) <= 1 && prevC < curFloors) {
-        c = prevC;
-      } else {
-        c = pickNearbyFloor(b, 1, -1, curFloors);
-      }
-      prevB = b;
-      prevC = c;
-      q.push({
-        delay: i === 0 ? 0.45 : gap,
-        delayType: i === 0 ? 'init' : phase,
-        phase,
-        action: 'gift',
-        belt: b,
-        cat: c,
-        startX: -26,
-        unlockFloor: unlocked,
-        gusted: false,
-      });
-      giftIdx++;
-    }
-
-    const wantPairs = w.pairs || 0;
-    const wantGusts = Math.min(wantPairs, w.gusts || 0);
-    const giftIndices = [];
-    for (let qi = 0; qi < q.length; qi++) {
-      if (q[qi].action === 'gift') giftIndices.push(qi);
-    }
-
-    if (wantPairs > 0 && curFloors >= 2) {
-      const pairOrders = [];
-      const used = new Set();
-      const maxOrd = giftIndices.length - 2;
-      for (let p = 0; p < wantPairs; p++) {
-        const targetOrder = wantPairs === 1
-          ? Math.max(0, maxOrd - 1)
-          : Math.round((p * maxOrd) / Math.max(1, wantPairs - 1));
-        for (let off = 0; off <= giftIndices.length * 2; off++) {
-          const ord = targetOrder + (off % 2 === 0 ? off / 2 : -Math.ceil(off / 2));
-          if (ord < 0 || ord > maxOrd) continue;
-          if (used.has(ord) || used.has(ord + 1)) continue;
-          const ev1 = q[giftIndices[ord]];
-          const ev2 = q[giftIndices[ord + 1]];
-          if (ev1.unlockFloor || ev2.unlockFloor) continue;
-          used.add(ord);
-          used.add(ord + 1);
-          pairOrders.push(ord);
-          break;
-        }
-      }
-      pairOrders.sort((a, b) => a - b);
-
-      const gustSet = new Set();
-      for (let gIdx = 0; gIdx < wantGusts; gIdx++) {
-        const pickIdx = Math.min(pairOrders.length - 1, Math.floor(((gIdx + 0.5) * pairOrders.length) / wantGusts));
-        if (!gustSet.has(pickIdx)) gustSet.add(pickIdx);
-        else {
-          for (let k = 0; k < pairOrders.length; k++) {
-            if (!gustSet.has(k)) { gustSet.add(k); break; }
-          }
-        }
-      }
-
-      const beltSpd = TUNE.beltSpeed || 38;
-      for (let pi = 0; pi < pairOrders.length; pi++) {
-        const ord = pairOrders[pi];
-        const ev1 = q[giftIndices[ord]];
-        const ev2 = q[giftIndices[ord + 1]];
-        const prevAnchor = ord > 0 ? q[giftIndices[ord - 1]].cat : startFloor;
-
-        const useFarPair = waveIdx >= 2 && (pi / Math.max(1, pairOrders.length)) < (w.farPairRatio !== undefined ? w.farPairRatio : 1.0);
-        if (!useFarPair) {
-          // Nearby 1-floor pair (PR #271 / Sawtooth style, or Sleighs 1-2)
-          const b1 = pickNearbyFloor(prevAnchor, 1, -1, curFloors);
-          const b2 = pickNearbyFloor(b1, 1, b1, curFloors);
-          const wantSplitNear = waveIdx >= 2 && (pi / Math.max(1, pairOrders.length)) < (w.splitPairProb || 0);
-          const c1 = b2;
-          const c2 = wantSplitNear ? pickNearbyFloor(b2, 1, b2, curFloors) : b2;
-          const origDelay2 = ev2.delay;
-          const origDelay3 = (ord + 2 < giftIndices.length) ? q[giftIndices[ord + 2]].delay : origDelay2;
-          const pairLag = 0.28;
-          const pairCycle = origDelay2 + origDelay3 * 0.76;
-          ev1.belt = b1;
-          ev2.belt = b2;
-          ev1.cat = c1;
-          ev2.cat = c2;
-          ev1.paired = true;
-          ev2.paired = true;
-          if (gustSet.has(pi)) {
-            const mul = w.gustMul || GUST.beltMul || 1.95;
-            const travelNormal = (TEETER_X - (-26)) / beltSpd;
-            const travelGust = (TEETER_X - (-26)) / (beltSpd * mul);
-            const gustDelay = Math.min(origDelay2, Math.max(0.24, travelNormal + pairLag - travelGust));
-            const gustStartX = Math.min(-26, TEETER_X - (travelNormal + pairLag - gustDelay) * beltSpd * mul);
-            ev1.gustLead = true;
-            ev1.warnDur = Math.max(GUST.warnTime || 1.0, gustDelay);
-            ev1.warnBelts = [b2, b1];
-            ev1.startX = -26;
-            ev2.gusted = true;
-            ev2.gustMul = mul;
-            ev2.triggerGust = true;
-            ev2.gustBelts = [b2];
-            ev2.delay = gustDelay;
-            ev2.isPairSecond = true;
-            ev2.startX = gustStartX;
-            if (ord + 2 < giftIndices.length) {
-              const ev3 = q[giftIndices[ord + 2]];
-              ev3.baseGap = pairCycle;
-              ev3.pairOffset = -gustDelay;
-              ev3.delay = Math.max(0.24, pairCycle - gustDelay);
-            }
-          } else {
-            ev1.startX = -26;
-            ev2.delay = pairLag;
-            ev2.isPairSecond = true;
-            ev2.startX = -26;
-            if (ord + 2 < giftIndices.length) {
-              const ev3 = q[giftIndices[ord + 2]];
-              ev3.baseGap = pairCycle;
-              ev3.pairOffset = -pairLag;
-              ev3.delay = Math.max(0.24, pairCycle - pairLag);
-            }
-          }
-          for (let k = ord + 2; k < giftIndices.length; k++) {
-            if (pairOrders.includes(k) || pairOrders.includes(k - 1)) break;
-            q[giftIndices[k]].belt = c2;
-            q[giftIndices[k]].cat = c2;
-          }
-          continue;
-        }
-
-        // Sleighs 3-8: spread toys out progressively across floors and into 2-chute pairs
-        const goingUp = prevAnchor <= 2;
-        const isFullSpread = (pi / Math.max(1, pairOrders.length)) < (w.fullSpreadPairRatio || 0);
-        const wantSplit = (pi / Math.max(1, pairOrders.length)) < (w.splitPairProb || 0);
-
-        const b1 = goingUp ? 0 : 4;
-        const b2 = goingUp ? 1 : 3;
-        const c1 = goingUp
-          ? (isFullSpread ? (wantSplit ? 3 : 4) : 4)
-          : (isFullSpread ? (wantSplit ? 1 : 0) : 0);
-        const c2 = goingUp
-          ? (isFullSpread ? 4 : 3)
-          : (isFullSpread ? 0 : 1);
-        const endFloor = goingUp ? 4 : 0;
-
-        const origDelay2 = ev2.delay;
-        const origDelay3 = (ord + 2 < giftIndices.length) ? q[giftIndices[ord + 2]].delay : origDelay2;
-
-        ev1.belt = b1;
-        ev2.belt = b2;
-        ev1.cat = c1;
-        ev2.cat = c2;
-        ev1.paired = true;
-        ev2.paired = true;
-
-        for (let k = ord + 2; k < giftIndices.length; k++) {
-          if (pairOrders.includes(k) || pairOrders.includes(k - 1)) break;
-          const prevF = k === ord + 2 ? endFloor : q[giftIndices[k - 1]].cat;
-          q[giftIndices[k]].belt = prevF;
-          q[giftIndices[k]].cat = prevF;
-        }
-
-        const pairLag = 0.12;
-        const needTwoDrops = c1 !== c2;
-        const minCycle = needTwoDrops ? 1.24 : 1.10;
-        const pairCycle = Math.max(minCycle, origDelay2 + origDelay3 * 0.76);
-
-        if (gustSet.has(pi)) {
-          const mul = w.gustMul || GUST.beltMul || 1.95;
-          const travelNormal = (TEETER_X - (-26)) / beltSpd;
-          const travelGust = (TEETER_X - (-26)) / (beltSpd * mul);
-          const gustDelay = Math.min(origDelay2, Math.max(0.24, travelNormal + pairLag - travelGust));
-          const gustStartX = Math.min(-26, TEETER_X - (travelNormal + pairLag - gustDelay) * beltSpd * mul);
-          ev1.gustLead = true;
-          ev1.warnDur = Math.max(GUST.warnTime || 1.0, gustDelay);
-          ev1.warnBelts = [b2, b1];
-          ev1.startX = -26;
-          ev2.gusted = true;
-          ev2.gustMul = mul;
-          ev2.triggerGust = true;
-          ev2.gustBelts = [b2];
-          ev2.delay = gustDelay;
-          ev2.isPairSecond = true;
-          ev2.startX = gustStartX;
-          if (ord + 2 < giftIndices.length) {
-            const ev3 = q[giftIndices[ord + 2]];
-            ev3.baseGap = pairCycle;
-            ev3.pairOffset = -gustDelay;
-            ev3.delay = Math.max(0.16, pairCycle - gustDelay);
-          }
-        } else {
-          ev1.startX = -26;
-          ev2.delay = pairLag;
-          ev2.isPairSecond = true;
-          ev2.startX = -26;
-          if (ord + 2 < giftIndices.length) {
-            const ev3 = q[giftIndices[ord + 2]];
-            ev3.baseGap = pairCycle;
-            ev3.pairOffset = -pairLag;
-            ev3.delay = Math.max(0.16, pairCycle - pairLag);
-          }
-        }
-      }
-    }
-
-    // Pre-seed the first w.preseedCount gifts along the belts so 3-4 toys are visible in Sleigh 1, rising to 7-9 in Sleigh 8
-    const beltSpd = TUNE.beltSpeed || 38;
-    const preN = Math.min(giftIndices.length, w.preseedCount !== undefined ? w.preseedCount : 2);
-    if (preN > 0) {
-      let cumTime = 0;
-      const arrivalTimes = [];
-      for (let gi = 0; gi < giftIndices.length; gi++) {
-        const ev = q[giftIndices[gi]];
-        cumTime += ev.delay;
-        const spd = ev.gusted ? beltSpd * (ev.gustMul || GUST.beltMul) : beltSpd;
-        const sx = ev.startX !== undefined ? ev.startX : -26;
-        arrivalTimes.push(cumTime + (TEETER_X - sx) / spd);
-      }
-      const shiftT = Math.max(0, arrivalTimes[0] - 1.90);
-      for (let gi = 0; gi < preN; gi++) {
-        const ev = q[giftIndices[gi]];
-        const targetArr = arrivalTimes[gi] - shiftT;
-        const spd = ev.gusted ? beltSpd * (ev.gustMul || GUST.beltMul) : beltSpd;
-        const newStartX = TEETER_X - targetArr * spd;
-        if (newStartX >= -24 && newStartX <= TEETER_X - 38) {
-          ev.startX = Math.round(newStartX);
-          ev.delay = gi === 0 ? 0.04 : 0.06;
-          delete ev.baseGap;
-          delete ev.pairOffset;
-        }
-      }
-      if (preN < giftIndices.length) {
-        const nextEv = q[giftIndices[preN]];
-        const targetArr = arrivalTimes[preN] - shiftT;
-        const spd = nextEv.gusted ? beltSpd * (nextEv.gustMul || GUST.beltMul) : beltSpd;
-        const sx = nextEv.startX !== undefined ? nextEv.startX : -26;
-        const elapsedPre = 0.04 + (preN - 1) * 0.06;
-        const neededSpawnT = Math.max(elapsedPre + 0.18, targetArr - (TEETER_X - sx) / spd);
-        nextEv.delay = neededSpawnT - elapsedPre;
-        nextEv.baseGap = nextEv.delay;
-        nextEv.pairOffset = 0;
-      }
-    }
-
-    // Schedule snowballs per sleigh (none in S1-S2, then S3:1, S4:2, S5:2, S6:3, S7:3, S8:4; never two at once)
-    const wantSnowballs = w.snowballs || 0;
-    q.snowballs = [];
-    if (wantSnowballs > 0) {
-      const sbStartX = 24;
-      const sbDur = (TEETER_X - sbStartX) / Math.max(38, beltSpd) + (TUNE.fallTime || 0.34);
-      const firstAt = wantSnowballs >= 4 ? 0.50 : (wantSnowballs === 3 ? 0.80 : 1.50);
-      const stepAt = Math.max(sbDur + 0.35, wantSnowballs === 1 ? 3.0 : (wantSnowballs === 2 ? 4.8 : 3.9));
-      for (let si = 0; si < wantSnowballs; si++) {
-        q.snowballs.push({
-          spawnAt: Number((firstAt + si * stepAt).toFixed(2)),
-          belt: si % (w.floors || 3),
-          startX: sbStartX,
-        });
-      }
-    }
-
-    const slackTouch = verifyWaveSolvable(q, w.teeter, carryCap, startFloor, startX, 1.0);
-    const slackMouse = verifyWaveSolvable(q, w.teeter, carryCap, startFloor, startX, TUNE.mouseTimeMul || 1.15);
-    const slack = Math.min(slackTouch, slackMouse);
-    if (slack > bestSlack || !bestQ) {
-      bestSlack = slack;
-      bestQ = q;
-      bestPrevB = prevB;
-      bestPrevC = prevC;
-    }
-    if (slack >= minSpare) break;
   }
 
-  S.lastBelt = bestPrevB;
-  S.lastCat = bestPrevC;
-  return bestQ;
+  // Initialize the live continuous spawner for this sleigh
+  const liveSp = createWaveSpawner(waveIdx, startFloor);
+  const initialEvents = generateNextSpawnerEvents(liveSp);
+  if (S) {
+    S.spawner = liveSp;
+    S.lastBelt = liveSp.lastFloor;
+    S.lastCat = liveSp.lastCat;
+  }
+  return initialEvents;
 }
 
 function startWave(waveIdx) {
@@ -1258,10 +1453,8 @@ function startWave(waveIdx) {
   }
 
   S.waveQueue = buildWaveQueue(S.sleighsDone);
-  S.snowballSchedule = (S.waveQueue && Array.isArray(S.waveQueue.snowballs))
-    ? S.waveQueue.snowballs.map(sb => ({ ...sb }))
-    : [];
-  S.spawnTimer = S.waveQueue.length ? effEventDelay(S.waveQueue[0]) : 1.0;
+  S.snowballSchedule = [];
+  S.spawnTimer = S.waveQueue.length ? effEventDelay(S.waveQueue[0]) : 0.04;
   syncTunePanel();
   reportScore();
 }
@@ -1389,44 +1582,46 @@ function processWaveQueue(dt) {
     return;
   }
 
-  // Spawn scheduled snowballs (never two snowballs on belts at the same time)
-  if (Array.isArray(S.snowballSchedule) && S.snowballSchedule.length > 0) {
+  if (S.inSleigh >= sleighTarget()) return;
+
+  if (!S.spawner) {
+    S.spawner = createWaveSpawner(S.sleighsDone, S.elf ? S.elf.floor : 0);
+  }
+  const sp = S.spawner;
+
+  // Snowballs only during build-up, never in first 3s, never during a peak, never at the same moment as a pair or gust
+  if (sp.snowballSlots.length > 0 && sp.stage === 'buildup' && sp.postBreatherHold <= 0) {
+    const baseSleighT = (S.sleighTimer || 0) / inputTimeMul();
     const activeSnowball = S.gifts.some(g => g.isSnowball && g.state !== 'done');
-    if (!activeSnowball && (S.sleighTimer || 0) >= S.snowballSchedule[0].spawnAt * inputTimeMul()) {
-      const sb = S.snowballSchedule.shift();
-      spawnSnowballOnBelt(sb.belt, sb.startX !== undefined ? sb.startX : 24);
+    const nextEv = S.waveQueue[0];
+    const pairOrGustNow = S.gustT > 0 || S.gustWarnT > 0 || Boolean(nextEv && (nextEv.paired || nextEv.gusted || nextEv.gustLead));
+    const slot = sp.snowballSlots[0];
+    const slotDue = sp.cycleIdx > slot.cycle || (sp.cycleIdx === slot.cycle && sp.cycleBuildT >= slot.buildT);
+    if (!activeSnowball && baseSleighT >= 3.0 && !pairOrGustNow && slotDue) {
+      sp.snowballSlots.shift();
+      sp.snowballsSpawned++;
+      spawnSnowballOnBelt((sp.snowballsSpawned - 1) % activeFloors(), 24);
     }
   }
 
-  // Keep the end-of-level burst (or steady flow in Sleigh 1) running until the sleigh is full
   if (!S.waveQueue.length) {
-    const activeGifts = S.gifts.filter(g => !g.isSnowball && g.state !== 'done' && g.state !== 'toBin' && g.state !== 'rejecting').length;
-    if (S.inSleigh + activeGifts < sleighTarget()) {
-      const w = wave();
-      const isBurst = (w.burstSize || 0) > 0;
-      const gap = isBurst ? w.burstGap : w.flowGap;
-      const nFloors = activeFloors();
-      const b = pickNearbyFloor(S.lastCat !== undefined ? S.lastCat : S.lastBelt, 1, S.lastBelt, nFloors);
-      const c = pickNearbyFloor(b, 1, -1, nFloors);
-      S.lastBelt = b;
-      S.lastCat = c;
-      S.waveQueue.push({
-        delay: gap,
-        delayType: isBurst ? 'burst' : 'flow',
-        phase: isBurst ? 'burst' : 'flow',
-        action: 'gift',
-        belt: b,
-        cat: c,
-        gusted: Boolean(isBurst && w.gustOnBurst),
-      });
-      if (S.spawnTimer <= 0) S.spawnTimer = gap * inputTimeMul();
-    } else {
-      return;
+    const nextEvs = generateNextSpawnerEvents(sp, S.waveRecycled || 0);
+    for (const ev of nextEvs) S.waveQueue.push(ev);
+    S.lastBelt = sp.lastFloor;
+    S.lastCat = sp.lastCat;
+    if (S.waveQueue.length && S.spawnTimer <= 0) {
+      S.spawnTimer = effEventDelay(S.waveQueue[0]);
     }
   }
 
+  const beltCap = beltCapForWave(S.sleighsDone);
   S.spawnTimer -= dt;
   while (S.waveQueue.length && S.spawnTimer <= 0) {
+    const onBelts = S.gifts.filter(g => !g.isSnowball && (g.state === 'belt' || g.state === 'teeter')).length;
+    if (onBelts >= beltCap) {
+      S.spawnTimer = 0;
+      break;
+    }
     const ev = S.waveQueue.shift();
     if (ev.phase) S.phase = ev.phase;
     if (ev.unlockFloor && ev.unlockFloor > (S.unlockedFloors || 2)) {
@@ -1441,6 +1636,9 @@ function processWaveQueue(dt) {
       S.gustWarnT = ev.warnDur || GUST.warnTime;
       S.gustWarnBelts = ev.belts ? ev.belts.slice() : [0, 1, 2, 3, 4];
     } else if (ev.action === 'gift') {
+      if (ev.isPeakStart) {
+        sp.peakTimes.push(ev.peakClock);
+      }
       const g = spawnGiftOnBelt(ev.belt, ev.startX !== undefined ? ev.startX : -30, null, ev.cat);
       if (ev.gustLead) {
         S.gustWarnT = ev.warnDur || GUST.warnTime;
@@ -1453,6 +1651,12 @@ function processWaveQueue(dt) {
       if (ev.triggerGust) {
         triggerGustNow(ev.gustBelts || (S.gustWarnBelts.length ? S.gustWarnBelts : [ev.belt]), ev.gustMul);
       }
+    }
+    if (!S.waveQueue.length) {
+      const nextEvs = generateNextSpawnerEvents(sp, S.waveRecycled || 0);
+      for (const nextEv of nextEvs) S.waveQueue.push(nextEv);
+      S.lastBelt = sp.lastFloor;
+      S.lastCat = sp.lastCat;
     }
     if (S.waveQueue.length) {
       S.spawnTimer += effEventDelay(S.waveQueue[0]);
@@ -1686,29 +1890,6 @@ function updateTransit(g, dt) {
       S.binShake = 0.45;
     }
     puff(BIN_X, BIN_Y - 10, '#FF3333', 10);
-    if (!S.tut && S.recycled < TUNE.recycleLimit && S.relaxT <= 0) {
-      const w = wave();
-      const isBurst = (w.burstSize || 0) > 0;
-      const repGap = isBurst ? w.burstGap : w.flowGap;
-      const nFloors = activeFloors();
-      const b = pickNearbyFloor(S.lastCat !== undefined ? S.lastCat : S.lastBelt, 1, S.lastBelt, nFloors);
-      const c = pickNearbyFloor(b, 1, -1, nFloors);
-      S.lastBelt = b;
-      S.lastCat = c;
-      const hadEmptyQueue = S.waveQueue.length === 0;
-      S.waveQueue.push({
-        delay: repGap,
-        delayType: isBurst ? 'burst' : 'flow',
-        phase: isBurst ? 'burst' : 'flow',
-        action: 'gift',
-        belt: b,
-        cat: c,
-        gusted: Boolean(isBurst && w.gustOnBurst),
-      });
-      if (hadEmptyQueue && S.spawnTimer <= 0) {
-        S.spawnTimer = repGap * inputTimeMul();
-      }
-    }
     checkLoss();
   }
 }
