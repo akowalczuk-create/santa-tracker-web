@@ -324,3 +324,70 @@ button.ghost {
 .tune-copy-btn:hover {
   background: #1B69C1;
 }
+
+.phew-rate-bar {
+  position: absolute;
+  top: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 26;
+  display: none;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 2px solid #FDE047;
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.45);
+}
+
+.phew-rate-bar.on {
+  display: inline-flex;
+}
+
+.phew-rate-btn {
+  margin: 0;
+  padding: 6px 13px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: #FFFFFF;
+  color: #0F172A;
+  border: 1.5px solid #CBD5E1;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.phew-rate-btn:hover {
+  background: #FDE047;
+  color: #0F172A;
+  border-color: #EAB308;
+}
+
+.download-ratings-btn {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: none;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: #16A34A;
+  color: #FFFFFF;
+  border: 2px solid #DCFCE7;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.5);
+}
+
+.download-ratings-btn.on {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.download-ratings-btn:hover {
+  background: #15803D;
+}
+
