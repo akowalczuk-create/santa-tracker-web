@@ -494,6 +494,29 @@ function drawSnowballOnBelt(g2, g) {
   g2.restore();
 }
 
+function drawPoofCloud(g2, u) {
+  const expand = u < 0.32 ? (u / 0.32) : 1 + (u - 0.32) * 0.55;
+  const alpha = u < 0.20 ? (u / 0.20) : Math.max(0, 1 - (u - 0.20) / 0.80);
+  const rScale = u < 0.35 ? (0.55 + 0.45 * (u / 0.35)) : Math.max(0.2, 1 - (u - 0.35) * 0.65);
+  g2.save();
+  g2.globalAlpha *= alpha;
+  const puffs = [
+    [0, 0, 17, '#FFFFFF'],
+    [-12, -5, 13, '#E2E8F0'],
+    [12, -4, 13, '#FFFFFF'],
+    [-9, 8, 12, '#FFFFFF'],
+    [10, 7, 12, '#E2E8F0'],
+    [0, -11, 12, '#FFFFFF'],
+  ];
+  for (const [px, py, pr, col] of puffs) {
+    g2.fillStyle = col;
+    g2.beginPath();
+    g2.arc(px * expand, py * expand, pr * rScale, 0, Math.PI * 2);
+    g2.fill();
+  }
+  g2.restore();
+}
+
 function drawGift(g2, g) {
   g2.save();
   if (g.state === 'belt' && g.x < 44) { g2.beginPath(); g2.rect(18, 0, W, H); g2.clip(); }
@@ -503,27 +526,35 @@ function drawGift(g2, g) {
     g2.restore();
     return;
   }
+  const isPoofCloud = g.state === 'fading' && g.missFx === 'C';
+  let drawToyBody = true;
   if (g.state === 'fading') {
     const a = Math.max(0, Math.min(1, g.fadeAlpha !== undefined ? g.fadeAlpha : 1));
-    g2.globalAlpha *= 0.38 * a;
-    const sc = 0.78 + 0.22 * a;
-    g2.scale(sc, sc);
+    const sc = g.fadeScale !== undefined ? g.fadeScale : (0.72 + 0.28 * a);
+    if (a <= 0.01 || sc <= 0.02) {
+      drawToyBody = false;
+    } else {
+      g2.globalAlpha *= a;
+      g2.scale(sc, sc);
+    }
   } else if (g.state === 'inBin') {
     g2.scale(0.80, 0.80);
-  } else if (g.state === 'teeter' && !g.tutGift) {
-    const teeterK = Math.max(0, Math.min(1, g.teeterProg || 0));
-    g2.globalAlpha *= 1 - 0.62 * teeterK;
   }
-  if (g.tilt) g2.rotate(g.tilt);
-  if (g.spin && (g.state === 'toBin' || g.state === 'landed')) g2.rotate(Math.sin(g.spin) * 0.28);
-  if (g.wrapped) drawWrapped(g2, 0, 0, 0.92, CATS[g.cat].color);
-  else {
-    const c = CATS[g.cat];
-    g2.fillStyle = c.glow; g2.beginPath(); g2.arc(0, 0, GIFT_R + 7, 0, 7); g2.fill();
-    g2.fillStyle = 'rgba(15,23,42,.85)'; g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.fill();
-    g2.strokeStyle = c.color; g2.lineWidth = 2.4;
-    g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.stroke();
-    drawIcon(g2, g.cat, 0, 0, 1.02, g.v || 0);
+  if (drawToyBody) {
+    if (g.tilt) g2.rotate(g.tilt);
+    if (g.spin && (g.state === 'toBin' || g.state === 'landed')) g2.rotate(Math.sin(g.spin) * 0.28);
+    if (g.wrapped) drawWrapped(g2, 0, 0, 0.92, CATS[g.cat].color);
+    else {
+      const c = CATS[g.cat];
+      g2.fillStyle = c.glow; g2.beginPath(); g2.arc(0, 0, GIFT_R + 7, 0, 7); g2.fill();
+      g2.fillStyle = 'rgba(15,23,42,.85)'; g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.fill();
+      g2.strokeStyle = c.color; g2.lineWidth = 2.4;
+      g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.stroke();
+      drawIcon(g2, g.cat, 0, 0, 1.02, g.v || 0);
+    }
+  }
+  if (isPoofCloud) {
+    drawPoofCloud(g2, g.fadeProg || 0);
   }
   g2.restore();
 }
@@ -1295,7 +1326,7 @@ function drawTakeoff(g2, S, t) {
     }
   }
 
-  const k = Math.min(t / 3.4, 1);
+  const k = Math.min(t / 2.4, 1);
   const p = takeoffPath(k);
   for (let i = 1; i < 30; i++) {
     const q = takeoffPath(k - i * 0.028);
@@ -1303,42 +1334,63 @@ function drawTakeoff(g2, S, t) {
     pxs(g2, q.x - 2, q.y + 30 + Math.round(Math.sin(i * 0.6 + t * 4) * 3), 1, 1,
       i % 3 ? '#FFE14D' : '#FFFFFF');
   }
-  const gallop = (!reduceMotion && Math.floor(t * 9) % 2) ? SPR_DEER_B : SPR_DEER_A;
-  const TEAM = [[54,-14],[88,-32],[122,-50]];
-  for (let i = 0; i < TEAM.length; i++) {
-    sprite(g2, gallop, p.x + TEAM[i][0], p.y + TEAM[i][1], 2);
-  }
-  for (let i = 0; i < 60; i++) {
-    pxs(g2, p.x + 46 + i, p.y + 16 - Math.round(i * 0.52), 1, 1, '#7C5539');
-  }
-  sprite(g2, SPR_SLEIGH, p.x, p.y, 2);
+  const sx = p.x * PXS + 36;
+  const sy = p.y * PXS + 36;
+  g2.save();
+  g2.translate(sx, sy);
+  g2.scale(0.82, 0.82);
+  g2.translate(-SLEIGH_X, -SLEIGH_Y);
+  drawSleighAndReindeer(g2, S, 12, 0, 0, -0.18, 1, true);
+  g2.restore();
 
-  if (t > 2.2) {
-    const on = reduceMotion || Math.floor(t * 2.5) % 2 === 0 || t > 3.4;
-    if (on) {
-      const waveStars = (S && S.waveStars && S.waveStars.length)
-        ? S.waveStars
-        : Array.from({ length: SLEIGHS.length }, () => true);
-      const starStr = waveStars.map(s => s ? '★' : '☆').join(' ');
-      g2.textAlign = 'center';
-      g2.font = "400 64px Lobster, 'Google Sans', cursive";
-      g2.lineJoin = 'round';
-      g2.strokeStyle = '#1D1D1D'; g2.lineWidth = 14;
-      g2.strokeText(ENDING.big, W / 2, H * 0.60, 820);
-      g2.fillStyle = '#FFE14D';
-      g2.fillText(ENDING.big, W / 2, H * 0.60, 820);
-      g2.font = "bold 20px 'Google Sans',sans-serif";
-      g2.strokeStyle = '#1D1D1D'; g2.lineWidth = 7;
-      g2.strokeText(ENDING.small, W / 2, H * 0.60 + 34, 820);
-      g2.fillStyle = '#FFFFFF';
-      g2.fillText(ENDING.small, W / 2, H * 0.60 + 34, 820);
-      g2.font = "bold 36px 'Google Sans',sans-serif";
-      g2.strokeStyle = '#1D1D1D'; g2.lineWidth = 9;
-      g2.strokeText(starStr, W / 2, H * 0.60 + 78);
-      g2.fillStyle = '#FF7733';
-      g2.fillText(starStr, W / 2, H * 0.60 + 78);
-      g2.textAlign = 'left';
-    }
+  // Flat Santa-Tracker style celebratory confetti
+  const CONFETTI_COLS = ['#FF3333', '#FFE14D', '#32A658', '#03B4C9', '#6F00FF', '#FFFFFF'];
+  g2.save();
+  for (let i = 0; i < 48; i++) {
+    const col = CONFETTI_COLS[i % CONFETTI_COLS.length];
+    const fallSpd = 68 + (i % 5) * 22;
+    const startY = -((i * 41) % 320);
+    const cy = reduceMotion
+      ? ((i * 53) % (H - 80)) + 24
+      : ((startY + t * fallSpd) % (H + 60)) - 20;
+    if (cy < -20 || cy > H + 20) continue;
+    const sway = reduceMotion ? 0 : Math.sin(t * (2.6 + (i % 4) * 0.5) + i * 1.3) * 18;
+    const cx0 = ((i * 73 + 29) % (W - 40)) + 20 + sway;
+    const ang = reduceMotion ? (i * 0.5) : (t * (2.2 + (i % 3) * 0.8) * (i % 2 ? 1 : -1) + i);
+    const cw = (i % 3 === 0) ? 10 : 12;
+    const ch = (i % 2 === 0) ? 6 : 8;
+    g2.save();
+    g2.translate(cx0, cy);
+    g2.rotate(ang);
+    g2.fillStyle = col;
+    g2.fillRect(-cw / 2, -ch / 2, cw, ch);
+    g2.restore();
+  }
+  g2.restore();
+
+  if (t > 0.65) {
+    const waveStars = (S && S.waveStars && S.waveStars.length)
+      ? S.waveStars
+      : Array.from({ length: SLEIGHS.length }, () => true);
+    const starStr = waveStars.map(s => s ? '★' : '☆').join(' ');
+    g2.textAlign = 'center';
+    g2.font = "400 64px Lobster, 'Google Sans', cursive";
+    g2.lineJoin = 'round';
+    g2.strokeStyle = '#1D1D1D'; g2.lineWidth = 14;
+    g2.strokeText(ENDING.big, W / 2, H * 0.60, 820);
+    g2.fillStyle = '#FFE14D';
+    g2.fillText(ENDING.big, W / 2, H * 0.60, 820);
+    g2.font = "bold 20px 'Google Sans',sans-serif";
+    g2.strokeStyle = '#1D1D1D'; g2.lineWidth = 7;
+    g2.strokeText(ENDING.small, W / 2, H * 0.60 + 34, 820);
+    g2.fillStyle = '#FFFFFF';
+    g2.fillText(ENDING.small, W / 2, H * 0.60 + 34, 820);
+    g2.font = "bold 36px 'Google Sans',sans-serif";
+    g2.strokeStyle = '#1D1D1D'; g2.lineWidth = 9;
+    g2.strokeText(starStr, W / 2, H * 0.60 + 78);
+    g2.fillStyle = '#FF7733';
+    g2.fillText(starStr, W / 2, H * 0.60 + 78);
+    g2.textAlign = 'left';
   }
 }
 
