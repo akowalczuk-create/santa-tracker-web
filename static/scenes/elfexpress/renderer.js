@@ -500,40 +500,24 @@ function drawGift(g2, g) {
   }
   if (g.state === 'fading') {
     const a = Math.max(0, Math.min(1, g.fadeAlpha !== undefined ? g.fadeAlpha : 1));
-    g2.globalAlpha *= a;
-    const sc = 0.72 + 0.28 * a;
+    g2.globalAlpha *= 0.38 * a;
+    const sc = 0.78 + 0.22 * a;
     g2.scale(sc, sc);
   } else if (g.state === 'inBin') {
     g2.scale(0.80, 0.80);
-  }
-  const teeterK = (g.state === 'teeter' && !g.tutGift) ? (g.teeterProg || 0) : 0;
-  const inDanger = teeterK >= 0.40;
-  const dangerU = inDanger ? (teeterK - 0.40) / 0.60 : 0;
-  const dangerFlash = inDanger && (reduceMotion ? teeterK >= 0.60 : (Math.sin((g.timer || 0) * (10 + 18 * dangerU) * Math.PI) > -0.15));
-  if (dangerFlash && !reduceMotion) {
-    const pSc = 1 + 0.08 * dangerU;
-    g2.scale(pSc, pSc);
+  } else if (g.state === 'teeter' && !g.tutGift) {
+    const teeterK = Math.max(0, Math.min(1, g.teeterProg || 0));
+    g2.globalAlpha *= 1 - 0.62 * teeterK;
   }
   if (g.tilt) g2.rotate(g.tilt);
   if (g.spin && (g.state === 'toBin' || g.state === 'landed')) g2.rotate(Math.sin(g.spin) * 0.28);
   if (g.wrapped) drawWrapped(g2, 0, 0, 0.92, CATS[g.cat].color);
   else {
     const c = CATS[g.cat];
-    if (dangerFlash || g.state === 'fading') {
-      g2.fillStyle = '#FF3333';
-      g2.beginPath(); g2.arc(0, 0, GIFT_R + 8.5, 0, 7); g2.fill();
-      g2.strokeStyle = '#FFE14D'; g2.lineWidth = 2.2;
-      g2.beginPath(); g2.arc(0, 0, GIFT_R + 8.5, 0, 7); g2.stroke();
-      g2.fillStyle = '#7F1D1D';
-      g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.fill();
-      g2.strokeStyle = '#FF3333'; g2.lineWidth = 2.8;
-      g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.stroke();
-    } else {
-      g2.fillStyle = c.glow; g2.beginPath(); g2.arc(0, 0, GIFT_R + 7, 0, 7); g2.fill();
-      g2.fillStyle = 'rgba(15,23,42,.85)'; g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.fill();
-      g2.strokeStyle = c.color; g2.lineWidth = 2.4;
-      g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.stroke();
-    }
+    g2.fillStyle = c.glow; g2.beginPath(); g2.arc(0, 0, GIFT_R + 7, 0, 7); g2.fill();
+    g2.fillStyle = 'rgba(15,23,42,.85)'; g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.fill();
+    g2.strokeStyle = c.color; g2.lineWidth = 2.4;
+    g2.beginPath(); g2.arc(0, 0, GIFT_R + 2, 0, 7); g2.stroke();
     drawIcon(g2, g.cat, 0, 0, 1.02, g.v || 0);
   }
   g2.restore();
@@ -707,15 +691,10 @@ function drawFitText(g2, txt, x, y, maxW, baseSize, minSize = 9) {
 }
 
 const WRAP_CACHE = new Map();
-function wrapText(g2, txt, maxW) {
+function wrapSingleLine(g2, txt, maxW) {
   if (!txt) return [];
-  const key = g2.font + '|' + maxW + '|' + txt;
-  const cached = WRAP_CACHE.get(key);
-  if (cached) return cached;
   if (g2.measureText(txt).width <= maxW) {
-    const res = [txt];
-    WRAP_CACHE.set(key, res);
-    return res;
+    return [txt];
   }
   const words = txt.split(' ');
   let bestIdx = -1, bestDiff = Infinity;
@@ -727,9 +706,7 @@ function wrapText(g2, txt, maxW) {
     }
   }
   if (bestIdx > 0) {
-    const res = [words.slice(0, bestIdx).join(' '), words.slice(bestIdx).join(' ')];
-    WRAP_CACHE.set(key, res);
-    return res;
+    return [words.slice(0, bestIdx).join(' '), words.slice(bestIdx).join(' ')];
   }
   const lines = []; let cur = '';
   for (const w of words) {
@@ -738,29 +715,46 @@ function wrapText(g2, txt, maxW) {
     else cur = next;
   }
   if (cur) lines.push(cur);
-  WRAP_CACHE.set(key, lines);
   return lines;
+}
+
+function wrapText(g2, txt, maxW) {
+  if (!txt) return [];
+  const key = g2.font + '|' + maxW + '|' + txt;
+  const cached = WRAP_CACHE.get(key);
+  if (cached) return cached;
+  const res = [];
+  for (const part of String(txt).split('\n')) {
+    for (const ln of wrapSingleLine(g2, part.trim(), maxW)) {
+      if (ln) res.push(ln);
+    }
+  }
+  WRAP_CACHE.set(key, res);
+  return res;
 }
 
 function getGuideTargets(S) {
   let beltFloor = -1;
+  let beltFloors = [];
   let chuteFloor = -1;
   let chuteFloors = [];
   let beltGift = null;
+  let beltGifts = [];
 
-  // Bouncing arrows for tutorial catch (belt) and drop (chute) steps
-  if (S.tut === 2 || S.tut === 3) {
-    const wantBelt = S.tut === 3 ? 1 : 0;
-    beltGift = S.gifts.find(g => g.tutGift && g.belt === wantBelt && g.state !== 'carried') ||
-      S.gifts.find(g => g.tutGift && g.state !== 'carried') || null;
-    beltFloor = beltGift ? beltGift.belt : wantBelt;
-  } else if (S.tut === 4) {
+  // Bouncing arrows and highlights for tutorial catch (belt) and drop (chute)
+  if (S.tut === 2) {
     const bag = (S.elf && S.elf.bag) || [];
     chuteFloors = Array.from(new Set(bag.map(g => g.cat)));
     chuteFloor = chuteFloors.length ? chuteFloors[0] : -1;
+    if (bag.length < (S.carryCap || 2)) {
+      beltGifts = S.gifts.filter(g => g.tutGift && (g.state === 'belt' || g.state === 'teeter'));
+      beltFloors = Array.from(new Set(beltGifts.map(g => g.belt)));
+      beltGift = beltGifts[0] || null;
+      beltFloor = beltFloors.length ? beltFloors[0] : -1;
+    }
   }
 
-  return { beltFloor, chuteFloor, chuteFloors, beltGift };
+  return { beltFloor, beltFloors, chuteFloor, chuteFloors, beltGift, beltGifts };
 }
 
 function drawWorkshop(g2, S, floors) {
@@ -801,7 +795,7 @@ function drawWorkshop(g2, S, floors) {
 
     const beltSel = S.cmd && S.cmd.type === 'belt' && S.cmd.floor === f;
     const beltQ = S.queue && S.queue.type === 'belt' && S.queue.floor === f;
-    const tutBeltGlow = guide.beltFloor === f;
+    const tutBeltGlow = guide.beltFloor === f || (guide.beltFloors && guide.beltFloors.includes(f));
     const liveHere = canCarryMore && S.gifts.some(g => g.belt === f && !g.isSnowball && !g.tutWatch &&
       (g.state === 'belt' || g.state === 'teeter' || g.state === 'falling'));
     if (beltSel || tutBeltGlow || S.beltPulse[f] > 0) {
@@ -1407,21 +1401,27 @@ function drawGuideArrows(g2, S) {
   const guide = getGuideTargets(S);
   const pulse = (S.uiT || S.t || 0) * 1.9;
 
-  // Bouncing arrows for tutorial steps 2 (conveyor) and 3 (chute), and Sleigh 6 two-hands moment
-  if (guide.beltGift || guide.beltFloor >= 0) {
+  if (guide.chuteFloors && guide.chuteFloors.length) {
+    const cx0 = CHUTE_BX + CHUTE_BW / 2;
+    for (const cf of guide.chuteFloors) {
+      const cy0 = chuteY(cf) - CHUTE_BH / 2 - 6;
+      drawBounceArrow(g2, cx0, cy0, pulse, '#FDE047');
+    }
+  }
+  if (guide.beltGifts && guide.beltGifts.length) {
+    for (const bg of guide.beltGifts) {
+      const gx = Math.max(BUILD_X0 + 36, Math.min(TEETER_X, bg.x));
+      const gy = beltY(bg.belt) - 34;
+      drawBounceArrow(g2, gx, gy, pulse, '#FDE047');
+    }
+  } else if (guide.beltGift || guide.beltFloor >= 0) {
     const gx = guide.beltGift
       ? Math.max(BUILD_X0 + 36, Math.min(TEETER_X, guide.beltGift.x))
       : (BUILD_X0 + TEETER_X) / 2;
     const bf = guide.beltGift ? guide.beltGift.belt : guide.beltFloor;
     const gy = beltY(bf) - 34;
     drawBounceArrow(g2, gx, gy, pulse, '#FDE047');
-  } else if (guide.chuteFloors && guide.chuteFloors.length) {
-    const cx0 = CHUTE_BX + CHUTE_BW / 2;
-    for (const cf of guide.chuteFloors) {
-      const cy0 = chuteY(cf) - CHUTE_BH / 2 - 6;
-      drawBounceArrow(g2, cx0, cy0, pulse, '#FDE047');
-    }
-  } else if (guide.chuteFloor >= 0) {
+  } else if (guide.chuteFloor >= 0 && !(guide.chuteFloors && guide.chuteFloors.length)) {
     const cx0 = CHUTE_BX + CHUTE_BW / 2;
     const cy0 = chuteY(guide.chuteFloor) - CHUTE_BH / 2 - 6;
     drawBounceArrow(g2, cx0, cy0, pulse, '#FDE047');
@@ -1455,7 +1455,7 @@ export const TUT_BOX_RECT = { x: 104, y: 120, w: 460, h: 124 };
 
 function getActiveTextBox(S) {
   if (!S) return null;
-  if (S.tut && S.tutBoxUp) return TUT[S.tut - 1] || null;
+  if (S.tut) return TUT[S.tut - 1] || null;
   if (S.snowballBoxUp) return SNOWBALL_TUT_BOX;
   return null;
 }
@@ -1463,6 +1463,7 @@ function getActiveTextBox(S) {
 function drawTutorialBox(g2, S) {
   const st = getActiveTextBox(S);
   if (!st || !st.text) return;
+  const showTapFooter = Boolean(S.snowballBoxUp || st.go === 'ok');
 
   const boxW = 460;
   g2.save();
@@ -1470,7 +1471,7 @@ function drawTutorialBox(g2, S) {
   const lines = wrapText(g2, st.text, boxW - 44);
   const lineH = 25;
   const textH = lines.length * lineH;
-  const boxH = textH + 62;
+  const boxH = textH + (showTapFooter ? 62 : 40);
   const boxX = Math.round((BUILD_X0 + BUILD_X1) / 2 - boxW / 2);
   const boxY = 124;
 
@@ -1502,14 +1503,16 @@ function drawTutorialBox(g2, S) {
   g2.fillStyle = '#1E293B';
   g2.textAlign = 'center';
   g2.textBaseline = 'middle';
-  const startY = boxY + 24 + lineH * 0.35;
+  const startY = boxY + (showTapFooter ? 24 : 20) + lineH * 0.35;
   for (let i = 0; i < lines.length; i++) {
     g2.fillText(lines[i], boxX + boxW / 2, startY + i * lineH);
   }
 
-  g2.font = "500 13px 'Google Sans',sans-serif";
-  g2.fillStyle = '#64748B';
-  g2.fillText('Tap anywhere to continue', boxX + boxW / 2, boxY + boxH - 20);
+  if (showTapFooter) {
+    g2.font = "500 13px 'Google Sans',sans-serif";
+    g2.fillStyle = '#64748B';
+    g2.fillText('Tap anywhere to continue', boxX + boxW / 2, boxY + boxH - 20);
+  }
   g2.restore();
 }
 
