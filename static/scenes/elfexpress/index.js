@@ -45,6 +45,7 @@ TUNE.climbSpeed = TUNE.baseClimbSpeed || 700;
 let S = null;
 let elfChoice = 0;
 let shortcutWave = 0;
+let shortcutWin = false;
 let missFxMode = 'A';
 let tunePanelEl = null;
 let tuneControls = null;
@@ -129,6 +130,25 @@ function parseMissFx(data) {
   }
   const up = String(raw || '').trim().toUpperCase();
   return (up === 'A' || up === 'B' || up === 'C') ? up : 'A';
+}
+
+function hasWinShortcut(data) {
+  if (data && (data.win === 1 || data.win === '1' || data.win === true || data.win === 'true')) return true;
+  try {
+    const v = new URLSearchParams(window.location.search).get('win');
+    if (v === '1' || v === 'true') return true;
+  } catch (_) {}
+  if (document.referrer) {
+    try {
+      const v = new URL(document.referrer).searchParams.get('win');
+      if (v === '1' || v === 'true') return true;
+    } catch (_) {}
+  }
+  try {
+    const v = new URLSearchParams(window.top.location.search).get('win');
+    if (v === '1' || v === 'true') return true;
+  } catch (_) {}
+  return false;
 }
 
 function hasTuneFlag(data) {
@@ -2712,6 +2732,10 @@ function frame(now) {
 
   if (S && (S.mode === 'takeoff' || (S.mode === 'over' && S.won))) {
     S.takeoff += dt;
+    if (S.takeoffLockT > 0) S.takeoffLockT = Math.max(0, S.takeoffLockT - dt);
+    if (S.mode === 'takeoff' && S.takeoff >= 4.0) {
+      finishWinGameOver();
+    }
   } else if (S && S.mode === 'play') {
     S.uiT = (S.uiT || 0) + dt;
     if (S.snowballBoxUp && S.snowballBoxLockT > 0) {
@@ -2759,7 +2783,15 @@ const clearKeys = () => { if (S) S.keys.left = S.keys.right = S.keys.up = S.keys
 
 let keysBound = false;
 function onKeyDown(ev) {
-  if (!S || S.mode !== 'play') return;
+  if (!S) return;
+  if (S.mode === 'takeoff') {
+    if ((ev.key === ' ' || ev.code === 'Space' || ev.key === 'Enter' || ev.keyCode === 32) && !ev.repeat) {
+      if ((S.takeoffLockT || 0) <= 0) finishWinGameOver();
+      ev.preventDefault();
+    }
+    return;
+  }
+  if (S.mode !== 'play') return;
   const k = KEYMAP[ev.key];
   if (k) {
     const tutHasBeltGift = Boolean(S.tut === 2 && S.gifts.some(g => g.tutGift && (g.state === 'belt' || g.state === 'teeter')));
@@ -2985,7 +3017,13 @@ window.addEventListener('pointerdown', ev => {
 
 cv.addEventListener('pointerdown', ev => {
   if (ev && ev.pointerType) setInputMode(ev.pointerType);
-  if (!S || S.mode !== 'play') return;
+  if (!S) return;
+  if (S.mode === 'takeoff') {
+    if ((S.takeoffLockT || 0) <= 0) finishWinGameOver();
+    ev.preventDefault();
+    return;
+  }
+  if (S.mode !== 'play') return;
   window.focus();
   cv.focus({ preventScroll: true });
   tapTarget(toGame(ev));
@@ -2997,27 +3035,36 @@ const el = id => document.getElementById(id);
 const show = (id, on) => { const node = el(id); if (node) node.classList.toggle('on', on); };
 const say = m => { el('sr').textContent = m; };
 
-function endRun(won) {
-  if (S.mode === 'over') return;
+function finishWinGameOver() {
+  if (!S || S.mode === 'over') return;
   S.mode = 'over';
-  S.won = won;
-  if (won) S.takeoff = 0;
-  show('btnSkipTut', false);
   unbindKeys();
+  api.gameover();
+}
+
+function endRun(won) {
+  if (S.mode === 'over' || S.mode === 'takeoff') return;
+  S.won = won;
+  show('btnSkipTut', false);
   reportScore();
   api.play('game_hurry_up_end');
   if (won) {
+    S.mode = 'takeoff';
+    S.takeoff = 0;
+    S.takeoffLockT = 0.25;
     api.play('pd_player_level_up');
     api.play('qd_complete');
     api.play('music_start_scene');
   } else {
+    S.mode = 'over';
+    unbindKeys();
     api.play('music_ingame_gameover');
     api.play('pd_game_over');
+    api.gameover();
   }
-  api.gameover();
 }
 
-// Starts either at a specific wave (1..5) if waveNum > 0, or at Wave 1 with the 5-step Diner Dash tutorial.
+// Starts either at a specific wave (1..8) if waveNum > 0, or at Wave 1 with the tutorial.
 function start(waveNum = 0) {
   fit();
   newGame();
@@ -3028,7 +3075,17 @@ function start(waveNum = 0) {
   }
   show('scrTitle', false);
   bindKeys();
-  if (waveNum >= 1 && waveNum <= WAVES.length) {
+  if (shortcutWin) {
+    S.tut = 0;
+    S.tutBoxUp = false;
+    show('btnSkipTut', false);
+    S.sleighsDone = WAVES.length;
+    S.waveStars = Array.from({ length: SLEIGHS.length }, () => true);
+    S.stars = SLEIGHS.length;
+    S.score = 12800;
+    say(_msg`elfexpress_sr_win`);
+    endRun(true);
+  } else if (waveNum >= 1 && waveNum <= WAVES.length) {
     S.tut = 0;
     S.tutBoxUp = false;
     show('btnSkipTut', false);
@@ -3088,6 +3145,7 @@ api.addEventListener('resume', () => {
 });
 
 api.addEventListener('restart', () => {
+  shortcutWin = false;
   start(shortcutWave || 0);
 });
 
@@ -3096,6 +3154,11 @@ api.addEventListener('data', ev => {
   missFxMode = parseMissFx(detail);
   if (S) S.missFx = missFxMode;
   if (hasTuneFlag(detail)) initTunePanel();
+  if (hasWinShortcut(detail)) {
+    shortcutWin = true;
+    start(0);
+    return;
+  }
   const w = parseWaveShortcut(detail);
   if (w) {
     shortcutWave = w;
@@ -3113,6 +3176,7 @@ if (typeof CanvasRenderingContext2D !== 'undefined' &&
 }
 
 missFxMode = parseMissFx(null);
+shortcutWin = hasWinShortcut(null);
 fit(); newGame(); S.mode = 'idle';
 if (hasTuneFlag(null)) initTunePanel();
 raf = requestAnimationFrame(frame);
@@ -3122,8 +3186,9 @@ api.ready(data => {
   missFxMode = parseMissFx(data);
   if (S) S.missFx = missFxMode;
   if (hasTuneFlag(data)) initTunePanel();
+  shortcutWin = hasWinShortcut(data);
   shortcutWave = parseWaveShortcut(data);
-  if (shortcutWave) {
+  if (shortcutWin || shortcutWave) {
     start(shortcutWave);
   } else {
     show('scrTitle', true);
