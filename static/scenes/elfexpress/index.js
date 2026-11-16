@@ -430,6 +430,7 @@ function newGame() {
     inputMode: activeInputMode,
     tuneMode: !!tunePanelEl,
     cmd: null, queue: null, keys: {},
+    beltIdleAfterGiftFloor: -1,
     firstSnowballShown: false, snowballBoxUp: false, snowballBoxLockT: 0, snowballHitT: 0, snowballShedAcc: 0, snowballSchedule: [],
     takeoff: 0, hitchT: 0, stars: 0, won: false,
     tut: 0, tutBoxUp: false, tutTimer: 0,
@@ -908,17 +909,17 @@ function createWaveSpawner(waveIdx, startFloor = 0) {
   const wantSnowballs = w.snowballs || 0;
   const snowballSlots = [];
   if (wantSnowballs === 1) {
-    snowballSlots.push({ cycle: 0, buildT: 4.8 });
+    snowballSlots.push({ cycle: 0, buildT: 3.0 });
   } else if (wantSnowballs === 2) {
-    snowballSlots.push({ cycle: 0, buildT: 4.2 }, { cycle: 0, buildT: 6.7 });
+    snowballSlots.push({ cycle: 0, buildT: 2.8 }, { cycle: 0, buildT: 5.6 });
   } else if (wantSnowballs === 3) {
-    snowballSlots.push({ cycle: 0, buildT: 4.2 }, { cycle: 0, buildT: 6.7 }, { cycle: 1, buildT: 4.2 });
+    snowballSlots.push({ cycle: 0, buildT: 2.6 }, { cycle: 0, buildT: 5.4 }, { cycle: 1, buildT: 2.8 });
   } else if (wantSnowballs >= 4) {
     snowballSlots.push(
-      { cycle: 0, buildT: 4.2 },
-      { cycle: 0, buildT: 6.7 },
-      { cycle: 1, buildT: 4.2 },
-      { cycle: 1, buildT: 6.7 }
+      { cycle: 0, buildT: 2.4 },
+      { cycle: 0, buildT: 5.2 },
+      { cycle: 1, buildT: 2.4 },
+      { cycle: 1, buildT: 5.2 }
     );
   }
   return {
@@ -950,6 +951,9 @@ function createWaveSpawner(waveIdx, startFloor = 0) {
     gustsSpawned: 0,
     snowballsSpawned: 0,
     snowballSlots,
+    lastSnowballBelt: -1,
+    beltLastWasSnowball: [false, false, false, false, false],
+    pendingAfterSnowballBelt: -1,
     peakTimes: [],
     giftsSpawned: 0,
     pendingJitter: 0,
@@ -1000,7 +1004,12 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
     sp.postBreatherHold = 0;
     const delay = sp.endGap + extraHold;
     const unlocked = checkSpawnerProgressiveFloor(sp);
-    const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, -1, 1);
+    const forcedBelt = (!unlocked && sp.pendingAfterSnowballBelt >= 0 && sp.pendingAfterSnowballBelt < sp.curFloors)
+      ? sp.pendingAfterSnowballBelt
+      : -1;
+    if (forcedBelt >= 0) sp.pendingAfterSnowballBelt = -1;
+    const b = unlocked ? (unlocked - 1) : (forcedBelt >= 0 ? forcedBelt : drawFloorFromBag(sp, sp.lastCat, -1, 1));
+    sp.beltLastWasSnowball[b] = false;
     const c = drawCatFromBag(sp, b, 1);
     sp.clock += delay;
     sp.nomClock += delay;
@@ -1024,7 +1033,12 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
     const peakGap = Number((baseGap * 0.5).toFixed(3));
     const isPeakStart = sp.peakRemaining === sp.peakSize;
     const unlocked = checkSpawnerProgressiveFloor(sp);
-    const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, -1, 1);
+    const forcedBelt = (!unlocked && sp.pendingAfterSnowballBelt >= 0 && sp.pendingAfterSnowballBelt < sp.curFloors)
+      ? sp.pendingAfterSnowballBelt
+      : -1;
+    if (forcedBelt >= 0) sp.pendingAfterSnowballBelt = -1;
+    const b = unlocked ? (unlocked - 1) : (forcedBelt >= 0 ? forcedBelt : drawFloorFromBag(sp, sp.lastCat, -1, 1));
+    sp.beltLastWasSnowball[b] = false;
     const c = drawCatFromBag(sp, b, 1);
     sp.clock += peakGap;
     sp.nomClock += peakGap;
@@ -1067,9 +1081,19 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
   const baseGap = spawnerIntervalAt(sp, sp.nomClock);
   const remBuild = (sp.cycleStartClock + BUILD_UP_DUR) - sp.nomClock;
   const nearGoal = sp.giftsSpawned >= goalGifts - 3 ? 1 : -1;
+  const nextSlot = sp.snowballSlots[0] || null;
+  const urgentSnowball = Boolean(nextSlot && (goalGifts - sp.giftsSpawned) <= sp.snowballSlots.length * 2 + 1);
+  const slotDueNow = Boolean(
+    nextSlot &&
+    sp.pendingAfterSnowballBelt < 0 &&
+    sp.giftsSpawned + 2 <= goalGifts &&
+    (urgentSnowball || sp.cycleIdx > nextSlot.cycle || (sp.cycleIdx === nextSlot.cycle && nomBuildT >= nextSlot.buildT))
+  );
 
   // Check if we should spawn the single pair (and optional gust) for this build-up cycle
   const canPair = !sp.pairDoneInCycle &&
+    sp.pendingAfterSnowballBelt < 0 &&
+    !slotDueNow &&
     sp.pairsSpawned < (w.pairs || 0) &&
     sp.curFloors >= 2 &&
     sp.giftsSpawned + 2 < goalGifts &&
@@ -1084,6 +1108,7 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
 
     const unlocked1 = checkSpawnerProgressiveFloor(sp);
     const b1 = unlocked1 ? (unlocked1 - 1) : drawFloorFromBag(sp, sp.lastCat, -1, 1);
+    sp.beltLastWasSnowball[b1] = false;
     const c1 = drawCatFromBag(sp, b1, 1);
     const pairLag = useGust ? 0.24 : 0.22;
     const nomPairStep = Math.max(0.28 + pairLag, baseGap);
@@ -1096,6 +1121,7 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
 
     const unlocked2 = checkSpawnerProgressiveFloor(sp);
     const b2 = unlocked2 ? (unlocked2 - 1) : drawFloorFromBag(sp, c1, b1, 1);
+    sp.beltLastWasSnowball[b2] = false;
     const c2 = sp.waveIdx <= 1 ? c1 : drawCatFromBag(sp, b2, 1);
     sp.clock += pairLag;
     sp.nomClock += pairLag;
@@ -1166,7 +1192,26 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
 
   const delay = stepGap + extraHold;
   const unlocked = checkSpawnerProgressiveFloor(sp);
-  const b = unlocked ? (unlocked - 1) : drawFloorFromBag(sp, sp.lastCat, -1, nearGoal);
+  let b;
+  if (unlocked) {
+    b = unlocked - 1;
+  } else if (sp.pendingAfterSnowballBelt >= 0 && sp.pendingAfterSnowballBelt < sp.curFloors) {
+    b = sp.pendingAfterSnowballBelt;
+    sp.pendingAfterSnowballBelt = -1;
+    if (b === sp.lastFloor) sp.floorRunLen++;
+    else { sp.lastFloor = b; sp.floorRunLen = 1; }
+  } else if (slotDueNow) {
+    const avoidBelt = sp.curFloors >= 2 ? sp.lastSnowballBelt : -1;
+    b = drawFloorFromBag(sp, sp.lastCat, avoidBelt, nearGoal);
+    if (sp.beltLastWasSnowball[b]) {
+      for (let f = 0; f < sp.curFloors; f++) {
+        if (!sp.beltLastWasSnowball[f]) { b = f; break; }
+      }
+    }
+  } else {
+    b = drawFloorFromBag(sp, sp.lastCat, -1, nearGoal);
+  }
+  sp.beltLastWasSnowball[b] = false;
   const c = drawCatFromBag(sp, b, nearGoal);
   sp.clock += delay;
   sp.nomClock += nomStep;
@@ -1185,6 +1230,21 @@ function generateNextSpawnerEvents(sp, missesSoFar = 0) {
     unlockFloor: unlocked,
     gusted: false,
   });
+
+  if (slotDueNow && !unlocked && !sp.beltLastWasSnowball[b] && sp.giftsSpawned < goalGifts) {
+    sp.snowballSlots.shift();
+    sp.snowballsSpawned++;
+    sp.lastSnowballBelt = b;
+    sp.beltLastWasSnowball[b] = true;
+    sp.pendingAfterSnowballBelt = b;
+    events.push({
+      delay: 0,
+      delayType: 'snowball',
+      phase,
+      action: 'snowball',
+      belt: b,
+    });
+  }
 
   if (sp.cycleBuildT >= BUILD_UP_DUR - 1e-4 && sp.giftsSpawned <= goalGifts) {
     sp.stage = 'peak';
@@ -1278,6 +1338,9 @@ function startWave(waveIdx) {
   S.waveQueue = buildWaveQueue(S.sleighsDone);
   S.gifts = [];
   S.snowballSchedule = [];
+  S.beltLastWasSnowball = [false, false, false, false, false];
+  S.snowballHitT = 0;
+  S.snowballShedAcc = 0;
   S.spawnTimer = S.waveQueue.length ? effEventDelay(S.waveQueue[0]) : 0.04;
   if (!S.tut && !S.firstSnowballShown && (w.snowballs || 0) > 0) {
     S.firstSnowballShown = true;
@@ -1305,25 +1368,60 @@ function nextBeltEdgeItem(floor) {
   return best;
 }
 
+function frontSnowballAtEdge(floor) {
+  const front = nextBeltEdgeItem(floor);
+  if (!front || !front.isSnowball) return null;
+  if (front.state === 'teeter' || (front.state === 'belt' && front.x >= TEETER_X - 36)) {
+    return front;
+  }
+  return null;
+}
+
+function activeCommittedSnowball() {
+  if (!S || !S.cmd || S.cmd.type !== 'belt' || !S.cmd.commitSnowballId || !S.gifts) return null;
+  return S.gifts.find(
+    g => g.id === S.cmd.commitSnowballId && g.isSnowball && (g.state === 'belt' || g.state === 'teeter')
+  ) || null;
+}
+
 function clearSnowballTaps() {
   if (!S || !S.gifts) return;
+  const keepId = S.cmd && S.cmd.commitSnowballId;
   for (const g of S.gifts) {
-    if (g.isSnowball) g.tappedByPlayer = false;
+    if (g.isSnowball && g.id !== keepId) g.tappedByPlayer = false;
   }
+}
+
+function tryGrabBeltSnowball(forgiving = false) {
+  if (!S || S.mode !== 'play' || (S.tut && S.tutBoxUp) || S.snowballBoxUp) return false;
+  const e = S.elf;
+  if (e.climbing) return false;
+  const maxX = forgiving ? LADDER_CX + 16 : TAP_SPLIT + 16;
+  if (e.x < BUILD_X0 || e.x > maxX) return false;
+  if (!forgiving && S.beltIdleAfterGiftFloor === e.floor) return false;
+  const sb = frontSnowballAtEdge(e.floor);
+  if (sb) return pickupSnowball(sb);
+  return false;
 }
 
 function pickupSnowball(sb) {
   if (!S || !sb || !sb.isSnowball || sb.state === 'done') return false;
   const e = S.elf;
-  if (e.x < DROP_X0 || e.x > DROP_X1) {
-    e.x = Math.max(DROP_X0, Math.min(DROP_X1, e.x));
+  if (e.x > TAP_SPLIT + 16) {
+    e.x = DROP_X1;
   }
   sb.state = 'done';
   sb.tappedByPlayer = false;
+  S.beltIdleAfterGiftFloor = -1;
+  if (S.cmd && S.cmd.commitSnowballId === sb.id) {
+    S.cmd.commitSnowballId = 0;
+  }
+  if (S.cmd && S.cmd.type === 'belt' && S.cmd.floor === sb.belt) {
+    S.cmd = S.queue || null;
+    S.queue = null;
+  }
   S.snowballHitT = TUNE.snowballSlowTime || 2.5;
   S.snowballShedAcc = 0;
-  S.cmd = null;
-  S.queue = null;
   S.actionBuf = 0;
   S.actionHeld = false;
   puff(e.x, carryY(e.floor, elfChoice), '#FFFFFF', 14);
@@ -1333,32 +1431,33 @@ function pickupSnowball(sb) {
   return true;
 }
 
-function spawnSnowballOnBelt(preferredBelt, startX = 24) {
-  const nFloors = activeFloors();
-  let safeBelt = Math.max(0, Math.min(nFloors - 1, preferredBelt || 0));
-  // Prefer a belt where the snowball will roll unimpeded to the edge
-  let bestFrontX = Infinity;
-  for (let i = 0; i < nFloors; i++) {
-    const f = (safeBelt + i) % nFloors;
-    const front = nextBeltEdgeItem(f);
-    const fx = front ? front.x : -999;
-    if (fx < bestFrontX) {
-      bestFrontX = fx;
-      safeBelt = f;
+function beltTailX(floor) {
+  if (!S || !S.gifts) return Infinity;
+  let minX = Infinity;
+  for (const g of S.gifts) {
+    if (g.belt === floor && (g.state === 'belt' || g.state === 'teeter')) {
+      if (g.x < minX) minX = g.x;
     }
   }
-  const frontOnChosen = nextBeltEdgeItem(safeBelt);
-  const spawnX = (frontOnChosen && frontOnChosen.x > startX - 10 && frontOnChosen.x < TEETER_X - 46)
-    ? Math.min(TEETER_X - 44, frontOnChosen.x + 34)
-    : startX;
+  return minX;
+}
+
+function spawnSnowballOnBelt(belt, startX = -78) {
+  const nFloors = activeFloors();
+  const safeBelt = Math.max(0, Math.min(nFloors - 1, belt || 0));
+  if (!S.beltLastWasSnowball) S.beltLastWasSnowball = [false, false, false, false, false];
+  if (S.beltLastWasSnowball[safeBelt]) return null;
+  const tailX = beltTailX(safeBelt);
+  const spawnX = tailX < Infinity ? Math.min(startX, tailX - 52) : startX;
   const g = {
     id: S.nextId++, cat: 0, v: 0, belt: safeBelt, state: 'belt',
     isSnowball: true, tappedByPlayer: false,
     x: spawnX, y: beltY(safeBelt) - GIFT_R,
-    timer: 0, teeter: 0,
+    timer: 0, teeter: wave().teeter,
     wrapped: false, tilt: 0, spin: 0, gusted: false,
     path: null, seg: 0, p: 0, speed: 0, dropFloor: -1, ductFloor: -1,
   };
+  S.beltLastWasSnowball[safeBelt] = true;
   S.gifts.push(g);
   return g;
 }
@@ -1366,6 +1465,10 @@ function spawnSnowballOnBelt(preferredBelt, startX = 24) {
 function spawnGiftOnBelt(belt, startX = -30, teeterOverride = null, catOverride = null) {
   const nFloors = activeFloors();
   const safeBelt = Math.max(0, Math.min(nFloors - 1, belt));
+  const tailX = beltTailX(safeBelt);
+  const spawnX = tailX < Infinity ? Math.min(startX, tailX - 52) : startX;
+  if (!S.beltLastWasSnowball) S.beltLastWasSnowball = [false, false, false, false, false];
+  S.beltLastWasSnowball[safeBelt] = false;
   const cat = (catOverride !== null && catOverride !== undefined)
     ? Math.max(0, Math.min(nFloors - 1, catOverride))
     : pickCategory(null, nFloors);
@@ -1374,7 +1477,7 @@ function spawnGiftOnBelt(belt, startX = -30, teeterOverride = null, catOverride 
   const v = (S.revealed && Math.random() < 0.55) ? 1 : 0;
   const g = {
     id: S.nextId++, cat, v, belt: safeBelt, state: 'belt',
-    x: startX, y: beltY(safeBelt) - GIFT_R,
+    x: spawnX, y: beltY(safeBelt) - GIFT_R,
     timer: 0, teeter: teeterOverride || wave().teeter,
     wrapped: false, tilt: 0, spin: 0, gusted: false,
     path: null, seg: 0, p: 0, speed: 0, dropFloor: -1, ductFloor: -1,
@@ -1424,21 +1527,6 @@ function processWaveQueue(dt) {
   }
   const sp = S.spawner;
 
-  // Snowballs only during build-up, never in first 3s, never during a peak, never at the same moment as a pair or gust
-  if (sp.snowballSlots.length > 0 && sp.stage === 'buildup' && sp.postBreatherHold <= 0) {
-    const baseSleighT = (S.sleighTimer || 0) / inputTimeMul();
-    const activeSnowball = S.gifts.some(g => g.isSnowball && g.state !== 'done');
-    const nextEv = S.waveQueue[0];
-    const pairOrGustNow = S.gustT > 0 || S.gustWarnT > 0 || Boolean(nextEv && (nextEv.paired || nextEv.gusted || nextEv.gustLead));
-    const slot = sp.snowballSlots[0];
-    const slotDue = sp.cycleIdx > slot.cycle || (sp.cycleIdx === slot.cycle && sp.cycleBuildT >= slot.buildT);
-    if (!activeSnowball && baseSleighT >= 3.0 && !pairOrGustNow && slotDue) {
-      sp.snowballSlots.shift();
-      sp.snowballsSpawned++;
-      spawnSnowballOnBelt((sp.snowballsSpawned - 1) % activeFloors(), 24);
-    }
-  }
-
   if (!S.waveQueue.length) {
     const nextEvs = generateNextSpawnerEvents(sp, S.waveRecycled || 0);
     for (const ev of nextEvs) S.waveQueue.push(ev);
@@ -1452,8 +1540,9 @@ function processWaveQueue(dt) {
   const beltCap = beltCapForWave(S.sleighsDone);
   S.spawnTimer -= dt;
   while (S.waveQueue.length && S.spawnTimer <= 0) {
+    const nextAction = S.waveQueue[0].action;
     const onBelts = S.gifts.filter(g => !g.isSnowball && (g.state === 'belt' || g.state === 'teeter')).length;
-    if (onBelts >= beltCap) {
+    if (nextAction !== 'snowball' && onBelts >= beltCap) {
       S.spawnTimer = 0;
       break;
     }
@@ -1470,6 +1559,8 @@ function processWaveQueue(dt) {
     if (ev.action === 'gustWarn') {
       S.gustWarnT = ev.warnDur || GUST.warnTime;
       S.gustWarnBelts = ev.belts ? ev.belts.slice() : [0, 1, 2, 3, 4];
+    } else if (ev.action === 'snowball') {
+      spawnSnowballOnBelt(ev.belt, -78);
     } else if (ev.action === 'gift') {
       if (ev.isPeakStart) {
         sp.peakTimes.push(ev.peakClock);
@@ -1506,12 +1597,22 @@ function updateGifts(dt) {
   const pausedBelts = S.relaxT > 0 || pausedByBox;
   const beltSpeedMul = (S.breatheSlowT > 0) ? 0.35 : 1.0;
   const teetering = [];
-  for (const g of S.gifts) if (!g.isSnowball && g.state === 'teeter') teetering[g.belt] = g;
+  for (const g of S.gifts) if (g.state === 'teeter') teetering[g.belt] = g;
 
   for (const g of S.gifts) {
+    if (g.state === 'done') continue;
     switch (g.state) {
       case 'belt': {
         if (pausedBelts) break;
+        const edgeItem = teetering[g.belt];
+        const edgeGap = (g.isSnowball || (edgeItem && edgeItem.isSnowball)) ? 48 : 40;
+        let limit = edgeItem ? TEETER_X - edgeGap : TEETER_X;
+        for (const o of S.gifts) {
+          if (o !== g && o.belt === g.belt && (o.state === 'belt' || o.state === 'teeter') && o.x > g.x && o.x - g.x < 240) {
+            const minSep = (g.isSnowball || o.isSnowball) ? 48 : 40;
+            limit = Math.min(limit, o.x - minSep);
+          }
+        }
         if (g.isSnowball) {
           const inGustBelts = !S.gustBelts || S.gustBelts.includes(g.belt);
           const blown = g.gusted || (S.gustT > 0 && inGustBelts && g.x < gustFront());
@@ -1520,9 +1621,11 @@ function updateGifts(dt) {
             if (!g.gustMul) g.gustMul = S.gustMul || wave().gustMul || GUST.beltMul;
           }
           const effGustMul = g.gustMul || S.gustMul || wave().gustMul || GUST.beltMul;
-          const spd = Math.max(52, TUNE.beltSpeed || 38) * (blown ? effGustMul : beltSpeedMul);
-          g.x += spd * dt;
-          g.spin = (g.spin || 0) + (spd * dt) / (TUNE.snowballRadius || GIFT_R);
+          const beltSpd = TUNE.beltSpeed || 49;
+          const spd = beltSpd * (blown ? effGustMul : beltSpeedMul);
+          const prevX = g.x;
+          g.x = Math.min(g.x + spd * dt, limit);
+          g.spin = (g.spin || 0) + Math.max(0, g.x - prevX) / (TUNE.snowballRadius || GIFT_R);
 
           if (g.tappedByPlayer) {
             const e = S.elf;
@@ -1530,22 +1633,24 @@ function updateGifts(dt) {
               pickupSnowball(g);
               break;
             }
-            if (S.cmd && S.cmd.type === 'belt' && S.cmd.floor === g.belt && S.cmd.targetSnowballId === g.id) {
-              g.x = Math.min(g.x, TEETER_X);
+            if (S.cmd && S.cmd.type === 'belt' && S.cmd.floor === g.belt && S.cmd.commitSnowballId === g.id) {
+              if (!teetering[g.belt] && g.x >= TEETER_X - 0.5) {
+                g.x = TEETER_X;
+                g.state = 'teeter';
+                g.timer = 0;
+                teetering[g.belt] = g;
+              }
               break;
             }
             g.tappedByPlayer = false;
           }
-          if (g.x >= TEETER_X - 0.5) {
-            g.state = 'falling';
+          if (!teetering[g.belt] && g.x >= TEETER_X - 0.5) {
+            g.x = TEETER_X;
+            g.state = 'teeter';
             g.timer = 0;
+            teetering[g.belt] = g;
           }
           break;
-        }
-        let limit = teetering[g.belt] ? TEETER_X - 40 : TEETER_X;
-        for (const o of S.gifts) {
-          if (o !== g && !o.isSnowball && o.belt === g.belt && (o.state === 'belt' || o.state === 'teeter') &&
-            o.x > g.x && o.x - g.x < 200) limit = Math.min(limit, o.x - 40);
         }
         const inGustBelts = !S.gustBelts || S.gustBelts.includes(g.belt);
         const blown = g.gusted || (S.gustT > 0 && inGustBelts && g.x < gustFront());
@@ -1567,6 +1672,9 @@ function updateGifts(dt) {
         if (pausedBelts) break;
         g.timer += dt;
         const len = teeterLen(g);
+        if (g.isSnowball && S.cmd && S.cmd.type === 'belt' && S.cmd.commitSnowballId === g.id) {
+          g.timer = Math.min(g.timer, Math.max(0, len - 0.02));
+        }
         const k = (g.tutGift && len > 100) ? 0.65 : Math.min(g.timer / len, 1);
         g.tilt = reduceMotion ? 0
           : Math.sin(g.timer * (3 + 11 * k * k) * Math.PI) * (0.06 + 0.30 * k * k);
@@ -1753,6 +1861,10 @@ function doAction(edge, manual) {
     return;
   }
 
+  if (!S.tut && tryGrabBeltSnowball(manual)) {
+    return;
+  }
+
   if (e.bag.length >= S.carryCap) {
     if (edge && manual && !e.climbing && !S.keys.left) {
       if (!S.tut || (S.tut === 4 && e.bag.some(item => item.cat === e.floor))) {
@@ -1805,6 +1917,7 @@ function doAction(edge, manual) {
     clearKeys();
   }
   S.cmd = null; S.queue = null;
+  S.beltIdleAfterGiftFloor = S.keys.left ? -1 : e.floor;
   clearSnowballTaps();
   S.catchFlash = 0.3;
   S.beltPulse[e.floor] = 0.5;
@@ -2020,11 +2133,18 @@ function updateElf(dt) {
   let mx = 0, my = 0;
   if (k.left) mx--; if (k.right) mx++; if (k.up) my--; if (k.down) my++;
 
+  if (S.beltIdleAfterGiftFloor >= 0) {
+    if (e.climbing || e.floor !== S.beltIdleAfterGiftFloor || e.x > TAP_SPLIT + 16 || mx < 0) {
+      S.beltIdleAfterGiftFloor = -1;
+    }
+  }
+
   if (mx <= 0 || e.climbing || e.x < CHUTE_BX - 12) {
     e.droppedOnRun = false;
   }
 
-  if (mx || my) {
+  const lockedSnowball = activeCommittedSnowball();
+  if ((mx || my) && !lockedSnowball) {
     if (e.climbing && e.climbTo === null) {
       let near = S.cmd ? S.cmd.floor : e.floor, best = 1e9;
       if (!S.cmd) {
@@ -2039,7 +2159,7 @@ function updateElf(dt) {
     clearSnowballTaps();
   }
 
-  if (my && e.climbTo === null && !e.climbing) {
+  if (!lockedSnowball && my && e.climbTo === null && !e.climbing) {
     const dir = my < 0 ? 1 : -1;
     const nextF = Math.max(0, Math.min(maxF, e.floor + dir));
     if (nextF !== e.floor) e.climbTo = nextF;
@@ -2049,12 +2169,21 @@ function updateElf(dt) {
     if (dt > 0) {
       const dist = Math.hypot(e.x - prevX, e.y - prevY);
       S.liveSpeed = dist > 0.1 ? dist / dt : 0;
-      if (S.snowballHitT > 0 && dist > 0.15) {
+      if (S.snowballHitT > 0 && dist > 0.15 && S.relaxT <= 0) {
+        const prevHit = S.snowballHitT;
+        const moveDt = dist >= effClimbSpd * dt * 0.45 ? dt : Math.min(dt, dist / Math.max(1, effRunSpd));
+        S.snowballHitT = Math.max(0, S.snowballHitT - moveDt);
+        if (Math.floor(prevHit * 3) !== Math.floor(S.snowballHitT * 3)) {
+          puff(e.x + (Math.random() - 0.5) * 20, e.y - 36, '#FFFFFF', 2);
+        }
         S.snowballShedAcc = (S.snowballShedAcc || 0) + dist;
         if (S.snowballShedAcc >= 16) {
           S.snowballShedAcc -= 16;
           puff(e.x + (Math.random() - 0.5) * 24, e.y - 38 + (Math.random() - 0.5) * 20, '#FFFFFF', 2);
           puff(e.x + (Math.random() - 0.5) * 22, e.y - 38 + (Math.random() - 0.5) * 18, '#BAE6FD', 1);
+        }
+        if (S.snowballHitT === 0 || Math.floor(prevHit * 10) !== Math.floor(S.snowballHitT * 10)) {
+          syncTunePanel();
         }
       }
     }
@@ -2068,7 +2197,7 @@ function updateElf(dt) {
     }
   };
 
-  if (e.climbTo !== null) {
+  if (!lockedSnowball && e.climbTo !== null) {
     const tf = Math.max(0, Math.min(maxF, e.climbTo));
     e.climbTo = tf;
     if (tf === e.floor && !e.climbing) {
@@ -2098,7 +2227,7 @@ function updateElf(dt) {
         e.bob = 0;
         moveX(e, e.x + mx * 1000, remDt);
         runIntoChuteDrop();
-        if (e.bag.length < S.carryCap) doAction(false, false);
+        if (!tryGrabBeltSnowball(false) && e.bag.length < S.carryCap) doAction(false, false);
         finishUpdateElf();
         return;
       }
@@ -2124,7 +2253,7 @@ function updateElf(dt) {
       } else if (mx) {
         moveX(e, e.x + mx * 1000, rem / effClimbSpd);
         runIntoChuteDrop();
-        if (e.bag.length < S.carryCap) doAction(false, false);
+        if (!tryGrabBeltSnowball(false) && e.bag.length < S.carryCap) doAction(false, false);
       } else {
         e.bob = 0;
       }
@@ -2133,16 +2262,17 @@ function updateElf(dt) {
     }
   }
 
-  if (mx) {
+  if (!lockedSnowball && mx) {
     e.y = feetY(e.floor);
     moveX(e, e.x + mx * 1000, dt);
     runIntoChuteDrop();
-    if (e.bag.length < S.carryCap) doAction(false, false);
+    if (!tryGrabBeltSnowball(false) && e.bag.length < S.carryCap) doAction(false, false);
     finishUpdateElf();
     return;
   }
 
   const idleCatch = () => {
+    if (tryGrabBeltSnowball(false)) return;
     if (e.bag.length < S.carryCap) doAction(false, false);
   };
 
@@ -2163,15 +2293,21 @@ function updateElf(dt) {
           return;
         }
       } else {
-        const targetSb = S.cmd.targetSnowballId
-          ? S.gifts.find(g => g.id === S.cmd.targetSnowballId && g.isSnowball && g.state === 'belt')
+        const targetSb = S.cmd.commitSnowballId
+          ? S.gifts.find(g => g.id === S.cmd.commitSnowballId && g.isSnowball && (g.state === 'belt' || g.state === 'teeter'))
           : null;
         if (targetSb) {
-          if ((e.x <= TAP_SPLIT + 16 || arrived) && targetSb.x >= TEETER_X - 36) {
+          if ((e.x <= TAP_SPLIT + 16 || arrived) && (targetSb.state === 'teeter' || targetSb.x >= TEETER_X - 36)) {
             pickupSnowball(targetSb);
             finishUpdateElf();
             return;
           }
+          finishUpdateElf();
+          return;
+        }
+        const edgeSb = (e.x <= TAP_SPLIT + 16 || arrived) ? frontSnowballAtEdge(cmdFloor) : null;
+        if (edgeSb) {
+          pickupSnowball(edgeSb);
           finishUpdateElf();
           return;
         }
@@ -2189,13 +2325,19 @@ function updateElf(dt) {
         S.cmd = null; S.queue = null;
         clearSnowballTaps();
       } else {
-        const targetSb = S.cmd.targetSnowballId
-          ? S.gifts.find(g => g.id === S.cmd.targetSnowballId && g.isSnowball && g.state === 'belt')
+        const targetSb = S.cmd.commitSnowballId
+          ? S.gifts.find(g => g.id === S.cmd.commitSnowballId && g.isSnowball && (g.state === 'belt' || g.state === 'teeter'))
           : null;
         if (targetSb) {
-          if (targetSb.x >= TEETER_X - 36) {
+          if (targetSb.state === 'teeter' || targetSb.x >= TEETER_X - 36) {
             pickupSnowball(targetSb);
           }
+          finishUpdateElf();
+          return;
+        }
+        const edgeSb = frontSnowballAtEdge(cmdFloor);
+        if (edgeSb) {
+          pickupSnowball(edgeSb);
           finishUpdateElf();
           return;
         }
@@ -2409,16 +2551,6 @@ function frame(now) {
       if (!S.tut && S.relaxT <= 0) {
         S.sleighTimer = (S.sleighTimer || 0) + dt;
       }
-      if (S.snowballHitT > 0) {
-        const prevHit = S.snowballHitT;
-        S.snowballHitT = Math.max(0, S.snowballHitT - dt);
-        if (Math.floor(prevHit * 3) !== Math.floor(S.snowballHitT * 3)) {
-          puff(S.elf.x + (Math.random() - 0.5) * 20, S.elf.y - 36, '#FFFFFF', 2);
-        }
-        if (S.snowballHitT === 0 || Math.floor(prevHit * 10) !== Math.floor(S.snowballHitT * 10)) {
-          syncTunePanel();
-        }
-      }
       const beltMul = (S.breatheSlowT > 0 || S.relaxT > 0) ? 0.28 : 1.0;
       S.beltAnimT += dt * beltMul;
       processWaveQueue(dt);
@@ -2464,32 +2596,35 @@ function onKeyDown(ev) {
     }
     const wasDown = !!S.keys[k];
     S.keys[k] = true;
-    S.cmd = null;
-    S.queue = null;
-    clearSnowballTaps();
-    if (!ev.repeat && !wasDown) {
-      const e = S.elf, maxF = S.tut === 2 ? 0 : activeFloors() - 1;
-      if (k === 'up' || k === 'down') {
-        const dir = k === 'up' ? 1 : -1;
-        let base = e.climbTo !== null ? e.climbTo : e.floor;
-        if (e.climbing) {
-          const curDir = feetY(base) < e.y ? 1 : feetY(base) > e.y ? -1 : 0;
-          if (curDir && curDir !== dir) {
-            if (dir > 0) {
-              for (let f = 0; f <= maxF; f++) { if (feetY(f) < e.y - 1) { base = f - 1; break; } }
-            } else {
-              for (let f = maxF; f >= 0; f--) { if (feetY(f) > e.y + 1) { base = f + 1; break; } }
+    if (k === 'left') S.beltIdleAfterGiftFloor = -1;
+    if (!activeCommittedSnowball()) {
+      S.cmd = null;
+      S.queue = null;
+      clearSnowballTaps();
+      if (!ev.repeat && !wasDown) {
+        const e = S.elf, maxF = S.tut === 2 ? 0 : activeFloors() - 1;
+        if (k === 'up' || k === 'down') {
+          const dir = k === 'up' ? 1 : -1;
+          let base = e.climbTo !== null ? e.climbTo : e.floor;
+          if (e.climbing) {
+            const curDir = feetY(base) < e.y ? 1 : feetY(base) > e.y ? -1 : 0;
+            if (curDir && curDir !== dir) {
+              if (dir > 0) {
+                for (let f = 0; f <= maxF; f++) { if (feetY(f) < e.y - 1) { base = f - 1; break; } }
+              } else {
+                for (let f = maxF; f >= 0; f--) { if (feetY(f) > e.y + 1) { base = f + 1; break; } }
+              }
             }
           }
-        }
-        const nextF = Math.max(0, Math.min(maxF, base + dir));
-        if (nextF !== e.floor || e.climbing) {
-          e.climbTo = nextF;
-          e.climbPause = 0;
-        }
-      } else if (!e.climbing && !S.keys.up && !S.keys.down) {
-        if ((k === 'left' && e.x <= LADDER_CX + 8) || (k === 'right' && e.x >= LADDER_CX - 8)) {
-          e.climbTo = null;
+          const nextF = Math.max(0, Math.min(maxF, base + dir));
+          if (nextF !== e.floor || e.climbing) {
+            e.climbTo = nextF;
+            e.climbPause = 0;
+          }
+        } else if (!e.climbing && !S.keys.up && !S.keys.down) {
+          if ((k === 'left' && e.x <= LADDER_CX + 8) || (k === 'right' && e.x >= LADDER_CX - 8)) {
+            e.climbTo = null;
+          }
         }
       }
     }
@@ -2593,12 +2728,21 @@ function tapTarget(p) {
   f = Math.max(0, Math.min(4, f));
   if (f >= activeFloors()) return;
   const t = { type: p.x < TAP_SPLIT ? 'belt' : 'chute', floor: f };
+
+  if (activeCommittedSnowball()) {
+    if (t.type !== 'belt' || t.floor !== S.cmd.floor) {
+      S.queue = t;
+    }
+    return;
+  }
+
   clearSnowballTaps();
   if (t.type === 'belt') {
-    const front = nextBeltEdgeItem(f);
-    if (front && front.isSnowball) {
-      front.tappedByPlayer = true;
-      t.targetSnowballId = front.id;
+    S.beltIdleAfterGiftFloor = -1;
+    const edgeSb = frontSnowballAtEdge(f);
+    if (edgeSb) {
+      edgeSb.tappedByPlayer = true;
+      t.commitSnowballId = edgeSb.id;
     }
   }
 
@@ -2610,9 +2754,9 @@ function tapTarget(p) {
     if (t.type === 'chute' && S.elf.x >= CHUTE_BX - 12 && S.elf.bag.length > 0) {
       releaseGift(false);
       S.cmd = null;
-    } else if (t.type === 'belt' && t.targetSnowballId) {
-      const sb = S.gifts.find(g => g.id === t.targetSnowballId && g.isSnowball && g.state === 'belt');
-      if (sb && S.elf.x <= TAP_SPLIT + 16 && sb.x >= TEETER_X - 36) {
+    } else if (t.type === 'belt' && t.commitSnowballId) {
+      const sb = S.gifts.find(g => g.id === t.commitSnowballId && g.isSnowball && (g.state === 'belt' || g.state === 'teeter'));
+      if (sb && S.elf.x <= TAP_SPLIT + 16 && (sb.state === 'teeter' || sb.x >= TEETER_X - 36)) {
         pickupSnowball(sb);
       }
     } else if (t.type === 'belt' && S.elf.bag.length < S.carryCap && catchable(false)) {
