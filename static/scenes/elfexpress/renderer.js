@@ -1522,6 +1522,29 @@ function drawTuneSpeedHud(g2, S) {
   g2.restore();
 }
 
+function drawMixCornerTag(g2, S) {
+  if (!S || !S.mixLetter) return;
+  g2.save();
+  g2.font = "bold 12px 'Google Sans',sans-serif";
+  const txt = `Version ${S.mixLetter}`;
+  const padX = 9;
+  const boxW = Math.ceil(g2.measureText(txt).width) + padX * 2;
+  const boxH = 22;
+  const x = W - 10 - boxW / 2;
+  const y = H - 16;
+  g2.fillStyle = 'rgba(15,23,42,.78)';
+  g2.strokeStyle = 'rgba(255,255,255,.45)';
+  g2.lineWidth = 1.5;
+  g2.beginPath();
+  g2.roundRect(x - boxW / 2, y - boxH / 2, boxW, boxH, 6);
+  g2.fill();
+  g2.stroke();
+  g2.fillStyle = '#F8FAFC';
+  g2.textAlign = 'center';
+  g2.textBaseline = 'middle';
+  g2.fillText(txt, x, y + 0.5);
+  g2.restore();
+}
 
 export function renderScene(S, elfChoice, floors, sleighTargetVal, canCatch) {
   const stg = document.getElementById('stage');
@@ -1592,5 +1615,6 @@ export function renderScene(S, elfChoice, floors, sleighTargetVal, canCatch) {
   drawGuideArrows(cx, S);
   drawTutorialBox(cx, S);
   drawTuneSpeedHud(cx, S);
+  drawMixCornerTag(cx, S);
   cx.restore();
 }

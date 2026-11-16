@@ -23,7 +23,7 @@ import {
   GROUND_Y, LADDER_CX, TAP_SPLIT, TEETER_X, DROP_X0, DROP_X1, DROP_CX,
   CHUTE_BX, CHUTE_CX, MACH_CX, SPINE_X, WRAP_X, LINE_SPEED, BIN_X, BIN_Y,
   SLEIGH_X, SLEIGH_Y, ELF_MIN_X, ELF_MAX_X, CARRY_OFF, GIFT_R,
-  feetY, beltY, chuteY, carryY, TUT, KEYMAP,
+  feetY, beltY, chuteY, carryY, TUT, KEYMAP, BALANCE_MIXES, applyBalanceMix,
 } from './constants.js';
 import {
   cv, fit, toGame, reduceMotion, viewX0, viewY0, viewX1, viewY1, renderScene,
@@ -48,6 +48,184 @@ let shortcutWave = 0;
 let tunePanelEl = null;
 let tuneControls = null;
 let activeInputMode = 'touch';
+let activeMixLetter = 'A';
+let phewRateBarEl = null;
+let downloadRatingsBtnEl = null;
+let topDownloadRatingsBtnEl = null;
+
+function parseMixLetter(data) {
+  let raw = data && data.mix;
+  if (raw === undefined || raw === null || raw === '') {
+    try {
+      raw = new URLSearchParams(window.location.search).get('mix');
+    } catch (_) {}
+  }
+  if ((raw === undefined || raw === null || raw === '') && document.referrer) {
+    try {
+      raw = new URL(document.referrer).searchParams.get('mix');
+    } catch (_) {}
+  }
+  if (raw === undefined || raw === null || raw === '') {
+    try {
+      raw = new URLSearchParams(window.top.location.search).get('mix');
+    } catch (_) {}
+  }
+  const key = String(raw || '').trim().toUpperCase();
+  return BALANCE_MIXES[key] ? key : '';
+}
+
+activeMixLetter = applyBalanceMix(parseMixLetter(null) || 'A') || 'A';
+
+function downloadRatingsFile() {
+  if (!S) return;
+  const now = new Date();
+  const iso = now.toISOString();
+  const localStr = now.toLocaleString();
+  const mix = S.mixLetter || activeMixLetter || 'A';
+  const inputType = S.inputMode || activeInputMode || 'touch';
+  const lines = [
+    `Version: ${mix}`,
+    `Date/Time: ${localStr} (${iso})`,
+    `Input type: ${inputType}`,
+    '',
+    'Sleigh ratings & misses:',
+  ];
+  for (let i = 0; i < WAVES.length; i++) {
+    const reached = S.sleighReached && S.sleighReached[i];
+    const rating = (S.sleighRatings && S.sleighRatings[i])
+      ? S.sleighRatings[i]
+      : (reached ? 'skipped' : '-');
+    const misses = (reached && S.sleighMisses && S.sleighMisses[i] !== null && S.sleighMisses[i] !== undefined)
+      ? String(S.sleighMisses[i])
+      : '-';
+    lines.push(`Sleigh ${i + 1}: rating=${rating}, misses=${misses}`);
+  }
+  const content = lines.join('\n') + '\n';
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = iso.replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url;
+  a.download = `elfexpress-ratings-${mix}-${stamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function ensureBalanceTestUi() {
+  const stg = document.getElementById('stage') || document.body;
+  if (!phewRateBarEl) {
+    const bar = document.createElement('div');
+    bar.id = 'phewRateBar';
+    bar.className = 'phew-rate-bar';
+    ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach(evName => {
+      bar.addEventListener(evName, ev => ev.stopPropagation());
+    });
+    ['Too easy', 'Just right', 'Too hard'].forEach(label => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'phew-rate-btn';
+      b.textContent = label;
+      b.addEventListener('pointerdown', ev => {
+        if (ev && ev.pointerType) setInputMode(ev.pointerType);
+        ev.stopPropagation();
+      });
+      b.addEventListener('click', ev => {
+        ev.stopPropagation();
+        if (!S || S.mode !== 'play' || !S.waitingForRating || (S.ratingLockoutT || 0) > 0) return;
+        const doneIdx = Math.max(0, (S.sleighsDone || 1) - 1);
+        if (S.sleighRatings) S.sleighRatings[doneIdx] = label;
+        S.waitingForRating = false;
+        S.ratingLockoutT = 0;
+        showPhewRateBar(false);
+        S.relaxT = 0;
+        S.breatheCueT = 0;
+        S.breatheSlowT = 0;
+        S.recycled = 0;
+        b.blur();
+        cv.focus({ preventScroll: true });
+        if (S.sleighsDone >= WAVES.length) {
+          S.stars = S.waveStars ? S.waveStars.filter(Boolean).length : 0;
+          say(_msg`elfexpress_sr_win`);
+          endRun(true);
+        } else {
+          startWave(S.sleighsDone);
+        }
+      });
+      bar.appendChild(b);
+    });
+    stg.appendChild(bar);
+    phewRateBarEl = bar;
+  }
+  if (!downloadRatingsBtnEl) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'btnDownloadRatings';
+    btn.className = 'download-ratings-btn';
+    btn.textContent = 'Download ratings';
+    ['pointerdown', 'mousedown', 'touchstart'].forEach(evName => {
+      btn.addEventListener(evName, ev => {
+        if (ev && ev.pointerType) setInputMode(ev.pointerType);
+        ev.stopPropagation();
+      });
+    });
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      downloadRatingsFile();
+    });
+    stg.appendChild(btn);
+    downloadRatingsBtnEl = btn;
+  }
+  try {
+    if (window.top && window.top !== window && window.top.document && !topDownloadRatingsBtnEl) {
+      const existing = window.top.document.getElementById('btnDownloadRatingsTop');
+      if (existing) existing.remove();
+      const topBtn = window.top.document.createElement('button');
+      topBtn.type = 'button';
+      topBtn.id = 'btnDownloadRatingsTop';
+      topBtn.textContent = 'Download ratings';
+      Object.assign(topBtn.style, {
+        position: 'fixed',
+        bottom: '22px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: '999999',
+        display: 'none',
+        padding: '10px 22px',
+        fontSize: '14px',
+        fontWeight: '700',
+        fontFamily: '"Google Sans", system-ui, sans-serif',
+        borderRadius: '999px',
+        background: '#16A34A',
+        color: '#FFFFFF',
+        border: '2px solid #DCFCE7',
+        boxShadow: '0 8px 24px rgba(2, 6, 23, 0.5)',
+        cursor: 'pointer',
+      });
+      topBtn.addEventListener('pointerdown', ev => {
+        if (ev && ev.pointerType) setInputMode(ev.pointerType);
+      });
+      topBtn.addEventListener('click', () => downloadRatingsFile());
+      window.top.document.body.appendChild(topBtn);
+      topDownloadRatingsBtnEl = topBtn;
+    }
+  } catch (_) {}
+}
+
+function showPhewRateBar(on) {
+  ensureBalanceTestUi();
+  if (phewRateBarEl) phewRateBarEl.classList.toggle('on', Boolean(on));
+}
+
+function showDownloadRatingsBtn(on) {
+  ensureBalanceTestUi();
+  if (downloadRatingsBtnEl) downloadRatingsBtnEl.classList.toggle('on', Boolean(on));
+  if (topDownloadRatingsBtnEl) {
+    topDownloadRatingsBtnEl.style.display = on ? 'inline-flex' : 'none';
+  }
+}
+
 function inputTimeMul(mode = (S && S.inputMode) || activeInputMode) {
   return mode === 'mouse' ? (TUNE.mouseTimeMul || 1.15) : 1.0;
 }
@@ -428,6 +606,12 @@ function newGame() {
     },
     liveSpeed: 0,
     inputMode: activeInputMode,
+    mixLetter: activeMixLetter,
+    sleighRatings: Array.from({ length: WAVES.length }, () => null),
+    sleighMisses: Array.from({ length: WAVES.length }, () => null),
+    sleighReached: Array.from({ length: WAVES.length }, () => false),
+    waitingForRating: false,
+    ratingLockoutT: 0,
     tuneMode: !!tunePanelEl,
     cmd: null, queue: null, keys: {},
     firstSnowballShown: false, snowballBoxUp: false, snowballBoxLockT: 0, snowballHitT: 0, snowballShedAcc: 0, snowballSchedule: [],
@@ -1234,7 +1418,12 @@ function buildWaveQueue(waveIdx) {
 }
 
 function startWave(waveIdx) {
+  showPhewRateBar(false);
+  S.waitingForRating = false;
+  S.ratingLockoutT = 0;
   S.sleighsDone = Math.max(0, Math.min(WAVES.length - 1, waveIdx));
+  if (S.sleighReached) S.sleighReached[S.sleighsDone] = true;
+  if (S.sleighMisses) S.sleighMisses[S.sleighsDone] = 0;
   S.inSleigh = 0;
   S.recycled = 0;
   S.waveRecycled = 0;
@@ -1405,13 +1594,15 @@ function triggerGustNow(belts, mul) {
 
 function processWaveQueue(dt) {
   if (S.tut) return;
-  if (S.relaxT > 0) {
-    S.relaxT = Math.max(0, S.relaxT - dt);
-    if (S.recycleDrainFrom > 0 && S.recycleDrainDur > 0) {
-      const k = Math.max(0, (S.relaxT - 0.35) / Math.max(0.5, S.recycleDrainDur - 0.35));
-      S.recycled = Math.max(0, Math.ceil(S.recycleDrainFrom * k - 0.05));
+  if (S.waitingForRating || S.relaxT > 0) {
+    if (S.relaxT > 0) {
+      S.relaxT = S.waitingForRating ? Math.max(0.01, S.relaxT - dt) : Math.max(0, S.relaxT - dt);
+      if (S.recycleDrainFrom > 0 && S.recycleDrainDur > 0) {
+        const k = Math.max(0, (S.relaxT - 0.35) / Math.max(0.5, S.recycleDrainDur - 0.35));
+        S.recycled = Math.max(0, Math.ceil(S.recycleDrainFrom * k - 0.05));
+      }
     }
-    if (S.relaxT <= 0) {
+    if (!S.waitingForRating && S.relaxT <= 0) {
       startWave(S.sleighsDone);
     }
     return;
@@ -1707,6 +1898,9 @@ function updateTransit(g, dt) {
     g.state = 'done';
     S.recycled++;
     S.waveRecycled = (S.waveRecycled || 0) + 1;
+    if (S.sleighMisses && S.sleighsDone < S.sleighMisses.length) {
+      S.sleighMisses[S.sleighsDone] = S.waveRecycled;
+    }
     if (!S.firstMissFlashed) {
       S.firstMissFlashed = true;
       S.binPulse = 2.4;
@@ -1744,7 +1938,7 @@ const atChute = () => !S.elf.climbing && S.elf.x >= LADDER_CX - 16;
 
 function doAction(edge, manual) {
   if (!S || S.mode !== 'play') return;
-  if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) return;
+  if ((S.tut && S.tutBoxUp) || S.snowballBoxUp || S.waitingForRating) return;
   const e = S.elf;
 
   if (manual && edge && e.bag.length > 0 && atChute()) {
@@ -1885,6 +2079,12 @@ function landInSleigh(g) {
   if (S.waveStars && S.sleighsDone < S.waveStars.length) {
     S.waveStars[S.sleighsDone] = earnedStar;
   }
+  if (S.sleighReached && S.sleighsDone < S.sleighReached.length) {
+    S.sleighReached[S.sleighsDone] = true;
+  }
+  if (S.sleighMisses && S.sleighsDone < S.sleighMisses.length) {
+    S.sleighMisses[S.sleighsDone] = S.waveRecycled || 0;
+  }
   S.lastSleighStar = earnedStar;
 
   S.inSleigh = 0; S.sleighsDone++;
@@ -1894,39 +2094,36 @@ function landInSleigh(g) {
   puff(SLEIGH_X, SLEIGH_Y - 18, '#FFE14D', 22);
   puff(SLEIGH_X, SLEIGH_Y - 18, '#32A658', 18);
 
-  if (S.sleighsDone >= WAVES.length) {
-    S.stars = S.waveStars ? S.waveStars.filter(Boolean).length : 0;
-    say(_msg`elfexpress_sr_win`);
-    endRun(true);
-  } else {
-    api.play('pd_player_level_up');
-    say(msgSleighAway(S.sleighsDone, SLEIGHS.length));
-    const prevWave = WAVES[Math.max(0, S.sleighsDone - 1)] || WAVES[0];
-    const pauseDur = prevWave.breathe || TUNE.relaxTime || 3.0;
-    S.phase = 'relax';
-    S.relaxT = pauseDur;
-    S.breatheCueDur = pauseDur;
-    S.breatheCueT = pauseDur;
-    S.breatheSlowT = pauseDur;
-    S.recycleDrainFrom = S.recycled || 0;
-    S.recycleDrainDur = pauseDur;
-    if (S.recycleDrainFrom > 0) {
-      puff(BIN_X, BIN_Y - 12, '#38BDF8', 10);
-    }
-    S.sleighFlyDur = Math.min(pauseDur, TUNE.sleighFlyTime || 1.8);
-    S.sleighFlyT = S.sleighFlyDur;
-    S.sleighFlyGifts = prevTarget;
-    S.waveQueue = [];
-    S.gifts = [];
-    S.elf.bag = [];
-    S.cmd = null;
-    S.queue = null;
-    S.actionEdge = false;
-    S.actionBuf = 0;
-    S.actionHeld = false;
-    clearKeys();
-    syncCarry();
+  api.play('pd_player_level_up');
+  say(msgSleighAway(S.sleighsDone, SLEIGHS.length));
+  const prevWave = WAVES[Math.max(0, S.sleighsDone - 1)] || WAVES[0];
+  const pauseDur = prevWave.breathe || TUNE.relaxTime || 3.0;
+  S.phase = 'relax';
+  S.relaxT = pauseDur;
+  S.waitingForRating = true;
+  S.ratingLockoutT = 0.5;
+  S.breatheCueDur = pauseDur;
+  S.breatheCueT = pauseDur;
+  S.breatheSlowT = pauseDur;
+  showPhewRateBar(true);
+  S.recycleDrainFrom = S.recycled || 0;
+  S.recycleDrainDur = pauseDur;
+  if (S.recycleDrainFrom > 0) {
+    puff(BIN_X, BIN_Y - 12, '#38BDF8', 10);
   }
+  S.sleighFlyDur = Math.min(pauseDur, TUNE.sleighFlyTime || 1.8);
+  S.sleighFlyT = S.sleighFlyDur;
+  S.sleighFlyGifts = prevTarget;
+  S.waveQueue = [];
+  S.gifts = [];
+  S.elf.bag = [];
+  S.cmd = null;
+  S.queue = null;
+  S.actionEdge = false;
+  S.actionBuf = 0;
+  S.actionHeld = false;
+  clearKeys();
+  syncCarry();
 }
 
 function breakCombo() {
@@ -2000,7 +2197,7 @@ function stepTo(e, tf, tx, dt) {
 function updateElf(dt) {
   const e = S.elf;
   const prevX = e.x, prevY = e.y;
-  if (S.snowballBoxUp || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && e.bag.length === 0)))) {
+  if (S.snowballBoxUp || S.waitingForRating || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && e.bag.length === 0)))) {
     clearKeys();
     S.cmd = null;
     S.queue = null;
@@ -2389,6 +2586,9 @@ function frame(now) {
     if (S.snowballBoxUp && S.snowballBoxLockT > 0) {
       S.snowballBoxLockT = Math.max(0, S.snowballBoxLockT - dt);
     }
+    if (S.waitingForRating && S.ratingLockoutT > 0) {
+      S.ratingLockoutT = Math.max(0, S.ratingLockoutT - dt);
+    }
     const pausedByTutBox = Boolean((S.tut && S.tutBoxUp) || S.snowballBoxUp);
     if (!pausedByTutBox) {
       S.t += dt;
@@ -2442,6 +2642,10 @@ const clearKeys = () => { if (S) S.keys.left = S.keys.right = S.keys.up = S.keys
 let keysBound = false;
 function onKeyDown(ev) {
   if (!S || S.mode !== 'play') return;
+  if (S.waitingForRating) {
+    ev.preventDefault();
+    return;
+  }
   const k = KEYMAP[ev.key];
   if (k) {
     if (S.snowballBoxUp || (S.tut && (S.tutBoxUp || (S.tut !== 2 && S.tut !== 3 && S.tut !== 4) || (S.tut === 4 && S.elf.bag.length === 0) || (S.tut === 2 && (k === 'up' || k === 'down'))))) {
@@ -2557,6 +2761,7 @@ window.addEventListener('blur', () => {
 });
 
 function tapTarget(p) {
+  if (S.waitingForRating) return;
   if ((S.tut && S.tutBoxUp) || S.snowballBoxUp) {
     tutDismissOk();
     return;
@@ -2630,6 +2835,12 @@ function endRun(won) {
   S.mode = 'over';
   S.won = won;
   if (won) S.takeoff = 0;
+  if (!won && S.sleighsDone < WAVES.length) {
+    if (S.sleighReached) S.sleighReached[S.sleighsDone] = true;
+    if (S.sleighMisses) S.sleighMisses[S.sleighsDone] = S.waveRecycled || S.recycled || 0;
+  }
+  showPhewRateBar(false);
+  showDownloadRatingsBtn(true);
   unbindKeys();
   reportScore();
   api.play('game_hurry_up_end');
@@ -2647,6 +2858,8 @@ function endRun(won) {
 // Starts either at a specific wave (1..5) if waveNum > 0, or at Wave 1 with the 5-step Diner Dash tutorial.
 function start(waveNum = 0) {
   fit();
+  showPhewRateBar(false);
+  showDownloadRatingsBtn(false);
   newGame();
   api.play('game_hurry_up_end');
   api.play('music_start_ingame');
@@ -2709,6 +2922,9 @@ api.addEventListener('restart', () => {
 
 api.addEventListener('data', ev => {
   const detail = ev && ev.detail;
+  const mix = parseMixLetter(detail) || 'A';
+  activeMixLetter = applyBalanceMix(mix) || 'A';
+  if (S) S.mixLetter = activeMixLetter;
   if (hasTuneFlag(detail)) initTunePanel();
   const w = parseWaveShortcut(detail);
   if (w) {
@@ -2727,11 +2943,15 @@ if (typeof CanvasRenderingContext2D !== 'undefined' &&
 }
 
 fit(); newGame(); S.mode = 'idle';
+ensureBalanceTestUi();
 if (hasTuneFlag(null)) initTunePanel();
 raf = requestAnimationFrame(frame);
 api.ready(data => {
   fit();
   api.play('qd_load_sounds');
+  const mix = parseMixLetter(data) || 'A';
+  activeMixLetter = applyBalanceMix(mix) || 'A';
+  if (S) S.mixLetter = activeMixLetter;
   if (hasTuneFlag(data)) initTunePanel();
   shortcutWave = parseWaveShortcut(data);
   if (shortcutWave) {
